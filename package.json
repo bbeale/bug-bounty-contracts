@@ -1,0 +1,25 @@
+{
+  "name": "bug-bounty-contracts",
+  "version": "1.0.0",
+  "description": "Decentralized Bug Bounty Plataform",
+  "main": "truffle-config.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "truffle test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/solidified-platform/bug-bounty-contracts.git"
+  },
+  "author": "JG Carvalho - @jgcarv",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/solidified-platform/bug-bounty-contracts/issues"
+  },
+  "homepage": "https://github.com/solidified-platform/bug-bounty-contracts#readme",
+  "dependencies": {
+    "truffle": "^5.0.18"
+  }
+}
