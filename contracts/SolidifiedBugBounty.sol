@@ -1,6 +1,6 @@
 pragma solidity 0.5.0;
 
-contract SolidifiedSketch{
+contract SolidifiedBugBounty{
 
     enum Severity { Critical, Major, Medium, Minor, Note}
     enum BugStatus { pending, accepted, rejected, negotiation, arbitration}
