@@ -11,6 +11,7 @@ contract SolidifiedSketch{
         address owner;
         bytes32 infoHash;
         uint256 Pool;
+        mapping(bool => Rewards) rewards;
         mapping(uint256 => Bug) bugs;
     }
 
@@ -33,6 +34,8 @@ contract SolidifiedSketch{
     mapping(uint256 => Project) public projects; //Owner => Id => Project
     mapping(uint => mapping(uint256 => Bug)) public bugs; //ProjectId => BugId => Bug
 
+    event ProjectPosted();
+
     constructor() public {
             projectCount++;
     }
@@ -46,19 +49,23 @@ contract SolidifiedSketch{
     function sendTip() public {}
 
     //Move funds between users and objetcs(Pool, Bug, Arbitration, etc)
-    function sendToPool() public {}
+    function sendToPool(address origin, uint256 poolId, uint256 amount) public {}
     function sendToBug() public {}
 
     /**
             Contract Posting Functions
     **/
-    function postProject(bytes32 ipfsHash, uint256 totalPool) public {
+    function postProject(bytes32 ipfsHash, uint256 totalPool, uint256[5] memory _rewardsValue) public {
+        require(isOrdered(_rewardsValue));
+        require(totalPool >= _rewardsValue[0]); 
         //Add hash to projects mapping
         projects[projectCount] = Project(projectCount, msg.sender, ipfsHash, totalPool);
-        //discount from owner balance
-        //emit event
-        //increment project count
+        projects[projectCount].rewards[true] = Rewards(_rewardsValue[0],_rewardsValue[1],_rewardsValue[2],_rewardsValue[3],_rewardsValue[4]);
+        sendToPool(msg.sender, projectCount, totalPool);
+        emit ProjectPosted();
+        projectCount++;
     }
+    
     function updateProject() public {}
     function increasePool() public {}
     function pullProject() public {}
@@ -84,5 +91,11 @@ contract SolidifiedSketch{
     function upgrade() public {}
     function changeFee() public {}
     function flagBugAsRepetivie() public {}
+
+    //Helper Functions
+    function isOrdered(uint256[5] memory _arr) public pure returns(bool){
+        return _arr[0] > _arr[1] && _arr[1] > _arr[2] && _arr[2] > _arr[3] && _arr[3] > _arr[4];
+    }
 }
+
 
