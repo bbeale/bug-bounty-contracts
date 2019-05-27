@@ -8,7 +8,8 @@
   },
   "scripts": {
     "test": "truffle test",
-    "compile": "truffle compile"
+    "compile": "truffle compile",
+    "coverage": "./node_modules/.bin/solidity-coverage" 
   },
   "repository": {
     "type": "git",

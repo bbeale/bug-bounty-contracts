@@ -36,11 +36,13 @@ contract SolidifiedBugBounty {
     uint256 internal projectCount;
     address public dai;
     mapping(address => uint256) public balances;
+    mapping(uint256 => uint256) public projectBalances;
     mapping(uint256 => Project) public projects; //Owner => Id => Project
     mapping(uint => mapping(uint256 => Bug)) public bugs; //ProjectId => BugId => Bug
 
     event ProjectPosted();
     event Deposit();
+    event Withdraw();
 
     constructor(address _dai) public {
         dai = _dai; 
@@ -60,13 +62,19 @@ contract SolidifiedBugBounty {
         require(balances[msg.sender] >= _amount);
         require(IERC20(dai).transfer(msg.sender,_amount));
         balances[msg.sender] = balances[msg.sender].sub(_amount);
-        emit Deposit();
+        emit Withdraw();
     }
 
-    // function sendTip() public {}
+    function __transfer(address _from, address _to, uint256 _amount) internal {
+        balances[_from] = balances[_from].sub(_amount);
+        balances[_to] = balances[_to].add(_amount);
+    }
 
     // //Move funds between users and objetcs(Pool, Bug, Arbitration, etc)
-    // function sendToPool(address origin, uint256 poolId, uint256 amount) public {}
+    function sendToPool(address origin, uint256 poolId, uint256 _amount) internal {
+        balances[origin] = balances[origin].sub(_amount);
+        projectBalances[poolId] = projectBalances[poolId].add(_amount)
+    }
     // function sendToBug() public {}
 
     /**
@@ -75,17 +83,18 @@ contract SolidifiedBugBounty {
     function postProject(bytes32 ipfsHash, uint256 totalPool, uint256[5] memory _rewardsValue) public {
         require(isOrdered(_rewardsValue));
         require(totalPool >= _rewardsValue[0]);
-        //Add hash to projects mapping
         projects[projectCount] = Project(projectCount, msg.sender, ipfsHash, totalPool);
         projects[projectCount].rewards[true] = Rewards(_rewardsValue[0],_rewardsValue[1],_rewardsValue[2],_rewardsValue[3],_rewardsValue[4]);
-        //sendToPool(msg.sender, projectCount, totalPool);
+        sendToPool(msg.sender, projectCount, totalPool);
         emit ProjectPosted();
         projectCount++;
     }
     
     function updateProject() public {}
     function increasePool() public {}
-    function pullProject() public {}
+    function pullProject(uint256 projectId) public {
+        require(condition, message);
+    }
     
     /**
             Bug Functions
