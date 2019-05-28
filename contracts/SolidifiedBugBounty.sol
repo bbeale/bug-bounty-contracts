@@ -1,4 +1,4 @@
-pragma solidity 0.5.8;
+pragma solidity 0.5.0;
 
 import "../node_modules/openzeppelin-solidity/contracts/math/SafeMath.sol";
 import "../node_modules/openzeppelin-solidity/contracts/token/ERC20/IERC20.sol";
@@ -73,7 +73,7 @@ contract SolidifiedBugBounty {
     // //Move funds between users and objetcs(Pool, Bug, Arbitration, etc)
     function sendToPool(address origin, uint256 poolId, uint256 _amount) internal {
         balances[origin] = balances[origin].sub(_amount);
-        projectBalances[poolId] = projectBalances[poolId].add(_amount)
+        projectBalances[poolId] = projectBalances[poolId].add(_amount);
     }
     // function sendToBug() public {}
 
@@ -90,38 +90,36 @@ contract SolidifiedBugBounty {
         projectCount++;
     }
     
-    function updateProject() public {}
-    function increasePool() public {}
+    // function updateProject() public {}
+    // function increasePool() public {}
     function pullProject(uint256 projectId) public {
-        require(condition, message);
+        require(msg.sender == projects[projectId].owner, "Not authorized");
     }
     
     /**
             Bug Functions
     **/
-    function postBug() public {}
-    function acceptBug() public {}
-    function rejectBug() public{}
-    function timeoutAccept() public {}
+    // function postBug() public {}
+    // function acceptBug() public {}
+    // function rejectBug() public{}
+    // function timeoutAccept() public {}
 
     /**
             Arbitration Functions
     **/
-    function sendToArbitration() public {}
-    function commitVote() public {}
-    function revealVote() public {}
+    // function sendToArbitration() public {}
+    // function commitVote() public {}
+    // function revealVote() public {}
 
     /**
             Administrartive Functions
     **/
-    function upgrade() public {}
-    function changeFee() public {}
-    function flagBugAsRepetivie() public {}
+    // function upgrade() public {}
+    // function changeFee() public {}
+    // function flagBugAsRepetivie() public {}
 
     //Helper Functions
     function isOrdered(uint256[5] memory _arr) internal pure returns(bool){
         return _arr[0] > _arr[1] && _arr[1] > _arr[2] && _arr[2] > _arr[3] && _arr[3] > _arr[4];
     }
 }
-
-
