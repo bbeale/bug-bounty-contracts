@@ -9,7 +9,7 @@
   "scripts": {
     "test": "truffle test",
     "compile": "truffle compile",
-    "coverage": "./node_modules/.bin/solidity-coverage" 
+    "coverage": "./node_modules/.bin/solidity-coverage"
   },
   "repository": {
     "type": "git",
@@ -26,6 +26,7 @@
     "truffle": "^5.0.18"
   },
   "devDependencies": {
+    "chai": "^4.2.0",
     "coveralls": "^3.0.3",
     "openzeppelin-test-helpers": "^0.4.0",
     "solidity-coverage": "^0.5.11"

@@ -53,7 +53,7 @@ contract SolidifiedBugBounty {
             Balance Functions
     **/
     function deposit(uint256 _amount) public {
-        require(IERC20(dai).transferFrom(msg.sender, address(this),_amount));
+        require(IERC20(dai).transferFrom(msg.sender, address(this),_amount), "transferFrom Dai failed");
         balances[msg.sender] = balances[msg.sender].add(_amount);
         emit Deposit();
     }
