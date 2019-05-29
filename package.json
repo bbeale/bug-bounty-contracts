@@ -7,7 +7,9 @@
     "test": "test"
   },
   "scripts": {
-    "test": "truffle test"
+    "test": "truffle test",
+    "compile": "truffle compile",
+    "coverage": "./node_modules/.bin/solidity-coverage"
   },
   "repository": {
     "type": "git",
@@ -20,6 +22,13 @@
   },
   "homepage": "https://github.com/solidified-platform/bug-bounty-contracts#readme",
   "dependencies": {
+    "openzeppelin-solidity": "^2.3.0",
     "truffle": "^5.0.18"
+  },
+  "devDependencies": {
+    "chai": "^4.2.0",
+    "coveralls": "^3.0.3",
+    "openzeppelin-test-helpers": "^0.4.0",
+    "solidity-coverage": "^0.5.11"
   }
 }
