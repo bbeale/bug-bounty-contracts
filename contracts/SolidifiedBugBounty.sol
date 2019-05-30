@@ -9,36 +9,41 @@ contract SolidifiedBugBounty {
 
     enum Severity { Critical, Major, Medium, Minor, Note}
     enum BugStatus { pending, accepted, rejected, negotiation, arbitration}
-    enum ProjectStatus {draft, active, unfunded, closed}
+    enum ProjectStatus {active, unfunded, closed}
 
     struct Project {
-        uint256 id;
         address owner;
         bytes32 infoHash;
-        uint256 Pool;
-        mapping(bool => Rewards) rewards;
-        mapping(uint256 => Bug) bugs;
+        ProjectStatus status;
+        mapping(uint256 => uint256) rewards; // Severity to reqerd value
     }
 
     struct Bug {
         address hunter;
+        uint256 timestamp;
+        uint256 value;
+        BugStatus status;
         Severity severity;
     }
 
-    struct Rewards {
-        uint256 Critical;
-        uint256 Major;
-        uint256 Medium;
-        uint256 Minor;
-        uint256 Suggestion;
-    }
+    // struct Rewards {
+    //     uint256 Critical;
+    //     uint256 Major;
+    //     uint256 Medium;
+    //     uint256 Minor;
+    //     uint256 Suggestion;
+    // }
 
     uint256 internal projectCount;
     address public dai;
     mapping(address => uint256) public balances;
-    mapping(uint256 => uint256) public projectBalances;
+    mapping(uint256 => bytes32) public projectIdtoHash;
+    mapping(uint256 => mapping(uint256 => uint256)) public bugBalances;
     mapping(uint256 => Project) public projects; //Owner => Id => Project
-    mapping(uint => mapping(uint256 => Bug)) public bugs; //ProjectId => BugId => Bug
+    mapping(uint256 => mapping(uint256 => Bug)) public bugs; //ProjectId => BugId => Bug
+    mapping(uint256 => uint256) public bugCount;
+
+    mapping(bytes32 => uint256) public objectBalances; //Non-address balances. For Projects is SHA3(owner, projectID), for Bugs is SHA3(ProjectHash, bugId), for arbitration is SHA3(projectHash, bugHash);
 
     event ProjectPosted();
     event Deposit();
@@ -70,22 +75,36 @@ contract SolidifiedBugBounty {
         balances[_to] = balances[_to].add(_amount);
     }
 
-    // //Move funds between users and objetcs(Pool, Bug, Arbitration, etc)
-    function sendToPool(address origin, uint256 poolId, uint256 _amount) internal {
-        balances[origin] = balances[origin].sub(_amount);
-        projectBalances[poolId] = projectBalances[poolId].add(_amount);
+    function __transfer(bytes32 _from, bytes32 _to, uint256 _amount) internal {
+        objectBalances[_from] = objectBalances[_from].sub(_amount);
+        objectBalances[_to] = objectBalances[_to].add(_amount);
     }
-    // function sendToBug() public {}
 
+    // //Move funds between users and objetcs(Pool, Bug, Arbitration, etc)
+    function sendToObject(address origin, bytes32 object, uint256 _amount) internal {
+        balances[origin] = balances[origin].sub(_amount);
+        objectBalances[object] = objectBalances[object].add(_amount);
+    }
+
+    function sendToAddress(bytes32 origin, address dest, uint256 _amount) internal {
+        objectBalances[origin] = objectBalances[origin].sub(_amount);
+        balances[dest] = balances[dest].add(_amount);
+        
+    }
     /**
             Contract Posting Functions
     **/
-    function postProject(bytes32 ipfsHash, uint256 totalPool, uint256[5] memory _rewardsValue) public {
-        require(isOrdered(_rewardsValue));
-        require(totalPool >= _rewardsValue[0]);
-        projects[projectCount] = Project(projectCount, msg.sender, ipfsHash, totalPool);
-        projects[projectCount].rewards[true] = Rewards(_rewardsValue[0],_rewardsValue[1],_rewardsValue[2],_rewardsValue[3],_rewardsValue[4]);
-        sendToPool(msg.sender, projectCount, totalPool);
+    function postProject(bytes32 ipfsHash, uint256 totalPool, uint256[5] memory _rewardsValue) public returns(uint256 projectId){
+        require(isOrdered(_rewardsValue), "Rewards must be ordered");
+        require(totalPool >= _rewardsValue[0], "totalPool should be greater than critical reward");
+        projectId = projectCount;
+        projects[projectId] = Project(msg.sender, ipfsHash, ProjectStatus.active);
+        for(uint i = 0; i < _rewardsValue.length; i++){
+            projects[projectId].rewards[i] = _rewardsValue[i];
+        }
+        bytes32 projectHash = keccak256(abi.encodePacked(msg.sender, projectId));
+        projectIdtoHash[projectId] = projectHash;
+        sendToObject(msg.sender, projectHash, totalPool);
         emit ProjectPosted();
         projectCount++;
     }
@@ -94,12 +113,23 @@ contract SolidifiedBugBounty {
     // function increasePool() public {}
     function pullProject(uint256 projectId) public {
         require(msg.sender == projects[projectId].owner, "Not authorized");
+        bytes32 projectHash = projectIdtoHash[projectId];
+        sendToAddress(projectHash, msg.sender, objectBalances[projectHash]);
+        projects[projectId].status = ProjectStatus.closed;
     }
     
     /**
             Bug Functions
     **/
-    // function postBug() public {}
+    function postBug(bytes32 bugDescription, uint256 projectId, Severity severity) public {
+        uint256 bugId = bugCount[projectId];
+        uint256 bugValue = projects[projectId].rewards[uint256(severity)];
+        bugs[projectId][bugId] = Bug(msg.sender, now, bugValue, BugStatus.pending, severity);
+        bytes32 bugHash = keccak256(abi.encodePacked(projectIdtoHash[projectId], bugId));
+        sendToObject(msg.sender, bugHash, bugValue.div(10));
+        __transfer(projectIdtoHash[projectId], bugHash, bugValue);
+        bugCount[projectId] = bugCount[projectId].add(1);
+    }
     // function acceptBug() public {}
     // function rejectBug() public{}
     // function timeoutAccept() public {}
@@ -118,8 +148,20 @@ contract SolidifiedBugBounty {
     // function changeFee() public {}
     // function flagBugAsRepetivie() public {}
 
+
+    //getters
+    function getProjectDetails(uint256 projectId) public view returns(address owner, bytes32 infoHash, ProjectStatus status, uint256[5] memory rewards, uint256 totalPool) {
+        Project memory p = projects[projectId];
+        owner = p.owner;
+        infoHash = p.infoHash;
+        status = p.status;
+        rewards = [projects[projectId].rewards[0],projects[projectId].rewards[1],projects[projectId].rewards[2],projects[projectId].rewards[3],projects[projectId].rewards[4]];
+        totalPool = objectBalances[projectIdtoHash[projectId]];
+    }
+
     //Helper Functions
     function isOrdered(uint256[5] memory _arr) internal pure returns(bool){
         return _arr[0] > _arr[1] && _arr[1] > _arr[2] && _arr[2] > _arr[3] && _arr[3] > _arr[4];
     }
+    
 }
