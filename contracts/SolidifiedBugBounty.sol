@@ -34,6 +34,7 @@ contract SolidifiedBugBounty {
     //     uint256 Suggestion;
     // }
 
+    uint256 constant public automaticApproval = 3 days; 
     uint256 internal projectCount;
     address public dai;
     mapping(address => uint256) public balances;
@@ -48,6 +49,7 @@ contract SolidifiedBugBounty {
     event ProjectPosted();
     event Deposit();
     event Withdraw();
+    event BugAccepted();
 
     constructor(address _dai) public {
         dai = _dai; 
@@ -109,13 +111,20 @@ contract SolidifiedBugBounty {
         projectCount++;
     }
     
-    // function updateProject() public {}
-    // function increasePool() public {}
     function pullProject(uint256 projectId) public {
         require(msg.sender == projects[projectId].owner, "Not authorized");
         bytes32 projectHash = projectIdtoHash[projectId];
         sendToAddress(projectHash, msg.sender, objectBalances[projectHash]);
         projects[projectId].status = ProjectStatus.closed;
+    }
+
+    function increasePool(uint256 projectId, uint256 _amount) public {
+        require(msg.sender == projects[projectId].owner, "Not authorized");
+        bytes32 projectHash = projectIdtoHash[projectId];
+        sendToObject(msg.sender, projectHash, _amount);
+        if(objectBalances[projectIdtoHash[projectId]] >= projects[projectId].rewards[0]){
+            projects[projectId].status = ProjectStatus.active;
+        }
     }
     
     /**
@@ -129,10 +138,34 @@ contract SolidifiedBugBounty {
         sendToObject(msg.sender, bugHash, bugValue.div(10));
         __transfer(projectIdtoHash[projectId], bugHash, bugValue);
         bugCount[projectId] = bugCount[projectId].add(1);
+        if(objectBalances[projectIdtoHash[projectId]] < projects[projectId].rewards[0]){
+            projects[projectId].status = ProjectStatus.unfunded;
+        }
     }
-    // function acceptBug() public {}
+
+    function acceptBug(uint256 projectId, uint256 bugId) public {
+        require(msg.sender == projects[projectId].owner, "Not authorized");
+        require(bugs[projectId][bugId].status == BugStatus.pending);
+        Bug memory bug = bugs[projectId][bugId];
+        bug.status = BugStatus.accepted;
+         bytes32 bugHash = keccak256(abi.encodePacked(projectIdtoHash[projectId], bugId));
+        sendToAddress(bugHash,bug.hunter, bug.value.add(bug.value.div(10)));
+        bugs[projectId][bugId] = bug;
+        emit BugAccepted();
+    }
+
+    function timeoutAcceptBug(uint256 projectId, uint256 bugId) public {
+        require(now.sub(bugs[projectId][bugId].timestamp) >= automaticApproval);
+        require(bugs[projectId][bugId].status == BugStatus.pending);
+        Bug memory bug = bugs[projectId][bugId];
+        bug.status = BugStatus.accepted;
+         bytes32 bugHash = keccak256(abi.encodePacked(projectIdtoHash[projectId], bugId));
+        sendToAddress(bugHash,bug.hunter, bug.value.add(bug.value.div(10)));
+        bugs[projectId][bugId] = bug;
+        emit BugAccepted();
+    }
+
     // function rejectBug() public{}
-    // function timeoutAccept() public {}
 
     /**
             Arbitration Functions
@@ -150,7 +183,7 @@ contract SolidifiedBugBounty {
 
 
     //getters
-    function getProjectDetails(uint256 projectId) public view returns(address owner, bytes32 infoHash, ProjectStatus status, uint256[5] memory rewards, uint256 totalPool) {
+    function getProjectDetails(uint256 projectId) external view returns(address owner, bytes32 infoHash, ProjectStatus status, uint256[5] memory rewards, uint256 totalPool) {
         Project memory p = projects[projectId];
         owner = p.owner;
         infoHash = p.infoHash;
@@ -159,9 +192,16 @@ contract SolidifiedBugBounty {
         totalPool = objectBalances[projectIdtoHash[projectId]];
     }
 
+    function getBugDetails(uint256 projectId, uint256 bugId) external view returns(address hunter, uint256 timestamp, BugStatus status, uint256 bugValue) {
+        Bug memory b = bugs[projectId][bugId];
+        hunter = b.hunter;
+        timestamp = b.timestamp;
+        status = b.status;
+        bugValue = b.value;
+    }
+
     //Helper Functions
     function isOrdered(uint256[5] memory _arr) internal pure returns(bool){
         return _arr[0] > _arr[1] && _arr[1] > _arr[2] && _arr[2] > _arr[3] && _arr[3] > _arr[4];
     }
-    
 }

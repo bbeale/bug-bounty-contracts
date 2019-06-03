@@ -4,6 +4,7 @@ const {
   BN,
   constants,
   expectEvent,
+  time,
   ether,
   expectRevert
 } = require("openzeppelin-test-helpers");
@@ -161,5 +162,163 @@ contract("Solidified Bug Bounty", accounts => {
         "totalPool should be greater than critical reward"
       );
     });
+
+    it("User can pull posted contracts", async () => {
+      const projectId = "1";
+      const totalPool = ether("5");
+      const ipfsHash = web3.utils.asciiToHex("Project Info");
+      const rewards = [
+        ether("3"),
+        ether("2"),
+        ether("1"),
+        ether("0.5"),
+        ether("0.1")
+      ];
+      await bugBounty.postProject(ipfsHash, totalPool, rewards, {
+        from: accounts[4]
+      });
+
+      await bugBounty.pullProject(projectId, {
+        from: accounts[4]
+      });
+
+      let project = await bugBounty.getProjectDetails.call(projectId);
+      assert.equal(project[0], accounts[4]);
+      assert.isTrue(project[2].eq(new BN("2")));
+    });
+
+    it("It fails when non-owner pulls contract", async () => {
+      const projectId = "1";
+      const totalPool = ether("5");
+      const ipfsHash = web3.utils.asciiToHex("Project Info");
+      const rewards = [
+        ether("3"),
+        ether("2"),
+        ether("1"),
+        ether("0.5"),
+        ether("0.1")
+      ];
+      await bugBounty.postProject(ipfsHash, totalPool, rewards, {
+        from: accounts[4]
+      });
+
+      await expectRevert(
+        bugBounty.pullProject(projectId, {
+          from: accounts[1]
+        }),
+        "Not authorized"
+      );
+    });
+
+    it("Owner can can increase project pool", async () => {
+      const projectId = "1";
+      const totalPool = ether("5");
+      const ipfsHash = web3.utils.asciiToHex("Project Info");
+      const rewards = [
+        ether("3"),
+        ether("2"),
+        ether("1"),
+        ether("0.5"),
+        ether("0.1")
+      ];
+      await bugBounty.postProject(ipfsHash, totalPool, rewards, {
+        from: accounts[4]
+      });
+
+      let project = await bugBounty.getProjectDetails.call(projectId);
+      const initialPool = project[4];
+      await bugBounty.increasePool(projectId, totalPool, {
+        from: accounts[4]
+      });
+      project = await bugBounty.getProjectDetails.call(projectId);
+      const finalPool = project[4];
+      assert.isTrue(initialPool.add(totalPool).eq(finalPool));
+    });
   }); //Context Posting and managing Projects
+
+  context("Posting Bugs", async () => {
+    const totalPool = ether("5");
+    const ipfsHash = web3.utils.asciiToHex("Project Info");
+    const rewards = [
+      ether("3"),
+      ether("2"),
+      ether("1"),
+      ether("0.5"),
+      ether("0.1")
+    ];
+    const projectId = new BN("1");
+    const bugId = new BN("0");
+    const projectOwner = accounts[1];
+
+    beforeEach(async () => {
+      bugBounty = await BugBounty.new(dai.address);
+      await distributeDai(accounts, dai);
+      await depositDai(accounts, dai, bugBounty);
+
+      await bugBounty.postProject(ipfsHash, totalPool, rewards, {
+        from: projectOwner
+      });
+    });
+
+    it("Hunter can submit bug", async () => {
+      const bugInfo = web3.utils.asciiToHex("Bug Info");
+      const severity = new BN("2");
+      const bugValue = rewards[severity.toNumber()];
+      const hunter = accounts[5];
+
+      let previousBalance = await bugBounty.balances.call(hunter);
+      await bugBounty.postBug(bugInfo, projectId, severity, { from: hunter });
+      let finalBalance = await bugBounty.balances.call(hunter);
+      let bug = await bugBounty.getBugDetails.call(projectId, bugId);
+      assert.equal(bug[0], hunter);
+      assert.isTrue(bug[2].isZero());
+      assert.isTrue(bug[3].eq(bugValue));
+      assert.isTrue(
+        previousBalance.eq(finalBalance.add(bugValue.div(new BN("10"))))
+      );
+    });
+
+    it("Project owner can accept bug", async () => {
+      const bugInfo = web3.utils.asciiToHex("Bug Info");
+      const projectId = new BN("1");
+      const severity = new BN("0");
+      const bugValue = rewards[severity.toNumber()];
+      const hunter = accounts[5];
+
+      let previousBalance = await bugBounty.balances.call(hunter);
+      await bugBounty.postBug(bugInfo, projectId, severity, { from: hunter });
+      await bugBounty.acceptBug(projectId, bugId, { from: projectOwner });
+
+      let finalBalance = await bugBounty.balances.call(hunter);
+      let bug = await bugBounty.getBugDetails.call(projectId, bugId);
+      let project = await bugBounty.getProjectDetails(projectId);
+      assert.equal(bug[0], hunter);
+      assert.isTrue(bug[2].eq(new BN("1")));
+      assert.isTrue(previousBalance.eq(finalBalance.sub(bugValue)));
+      assert.isTrue(project[2].eq(new BN("1")));
+      assert.isTrue(project[4].eq(totalPool.sub(bugValue)));
+    });
+
+    it("Bug can accept if timeout has passed", async () => {
+      const bugInfo = web3.utils.asciiToHex("Bug Info");
+      const projectId = new BN("1");
+      const severity = new BN("0");
+      const bugValue = rewards[severity.toNumber()];
+      const hunter = accounts[5];
+
+      let previousBalance = await bugBounty.balances.call(hunter);
+      await bugBounty.postBug(bugInfo, projectId, severity, { from: hunter });
+      await time.increase(time.duration.days(4));
+      await bugBounty.timeoutAcceptBug(projectId, bugId);
+
+      let finalBalance = await bugBounty.balances.call(hunter);
+      let bug = await bugBounty.getBugDetails.call(projectId, bugId);
+      let project = await bugBounty.getProjectDetails(projectId);
+      assert.equal(bug[0], hunter);
+      assert.isTrue(bug[2].eq(new BN("1")));
+      assert.isTrue(previousBalance.eq(finalBalance.sub(bugValue)));
+      assert.isTrue(project[2].eq(new BN("1")));
+      assert.isTrue(project[4].eq(totalPool.sub(bugValue)));
+    });
+  }); //Context Posting Bugs
 });
