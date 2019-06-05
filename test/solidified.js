@@ -25,21 +25,6 @@ const depositDai = async (addresses, daiContract, bugBountyContract) => {
       from: add
     });
   }
-
-  // addresses.forEach(async add => {
-  //   const amount = new BN("10000000000000000000");
-  //   await daiContract.approve(bugBountyContract.address, amount, { from: add });
-  //   await bugBountyContract.deposit(amount, {
-  //     from: add
-  //   });
-  // });
-  // addresses.forEach(async add => {
-  //   const amount = new BN("10000000000000000000");
-  //   //await daiContract.approve(bugBountyContract.address, amount, { from: add });
-  //   await bugBountyContract.deposit(amount, {
-  //     from: add
-  //   });
-  // });
 };
 
 contract("Solidified Bug Bounty", accounts => {
@@ -319,6 +304,75 @@ contract("Solidified Bug Bounty", accounts => {
       assert.isTrue(previousBalance.eq(finalBalance.sub(bugValue)));
       assert.isTrue(project[2].eq(new BN("1")));
       assert.isTrue(project[4].eq(totalPool.sub(bugValue)));
+    });
+
+    it("Owner can make counter proposal", async () => {
+      const bugInfo = web3.utils.asciiToHex("Bug Info");
+      const justification = web3.utils.asciiToHex("Justification");
+      const projectId = new BN("1");
+      const severity = new BN("0");
+      const newSeverity = new BN("2");
+      const bugValue = rewards[severity.toNumber()];
+      const hunter = accounts[5];
+      await bugBounty.postBug(bugInfo, projectId, severity, { from: hunter });
+      await bugBounty.rejectBug(projectId, bugId, justification, newSeverity, {
+        from: projectOwner
+      });
+
+      let proposal = await bugBounty.getLatestProposal.call(projectId, bugId);
+      let bug = await bugBounty.getBugDetails.call(projectId, bugId);
+      assert.equal(proposal[0], projectOwner);
+      assert.isTrue(bug[2].eq(new BN("3")));
+    });
+
+    it("Hunter can accept owner proposal", async () => {
+      const bugInfo = web3.utils.asciiToHex("Bug Info");
+      const justification = web3.utils.asciiToHex("Justification");
+      const projectId = new BN("1");
+      const severity = new BN("0");
+      const newSeverity = new BN("2");
+      const bugValue = rewards[newSeverity.toNumber()];
+      const hunter = accounts[5];
+      let previousBalance = await bugBounty.balances.call(hunter);
+      await bugBounty.postBug(bugInfo, projectId, severity, { from: hunter });
+      await bugBounty.rejectBug(projectId, bugId, justification, newSeverity, {
+        from: projectOwner
+      });
+      await bugBounty.acceptProposal(projectId, bugId, { from: hunter });
+      let finalBalance = await bugBounty.balances.call(hunter);
+      let proposal = await bugBounty.getLatestProposal.call(projectId, bugId);
+      let bug = await bugBounty.getBugDetails.call(projectId, bugId);
+      let project = await bugBounty.getProjectDetails(projectId);
+      assert.equal(proposal[0], projectOwner);
+      assert.isTrue(bug[2].eq(new BN("1")));
+      assert.isTrue(previousBalance.eq(finalBalance.sub(bugValue)));
+      assert.isTrue(project[4].eq(totalPool.sub(bugValue)));
+    });
+
+    it("Hunter can make counter proposal", async () => {
+      const bugInfo = web3.utils.asciiToHex("Bug Info");
+      const justification = web3.utils.asciiToHex("Justification");
+      const counterJust = web3.utils.asciiToHex("Counter Justification");
+      const projectId = new BN("1");
+      const severity = new BN("0");
+      const newSeverity = new BN("2");
+      const finalSeverity = new BN("1");
+      const hunter = accounts[5];
+      await bugBounty.postBug(bugInfo, projectId, severity, { from: hunter });
+      await bugBounty.rejectBug(projectId, bugId, justification, newSeverity, {
+        from: projectOwner
+      });
+      await bugBounty.counterProposal(
+        projectId,
+        bugId,
+        counterJust,
+        finalSeverity,
+        { from: hunter }
+      );
+      let proposal = await bugBounty.getLatestProposal.call(projectId, bugId);
+      let bug = await bugBounty.getBugDetails.call(projectId, bugId);
+      assert.equal(proposal[0], hunter);
+      assert.isTrue(bug[2].eq(new BN("3")));
     });
   }); //Context Posting Bugs
 });

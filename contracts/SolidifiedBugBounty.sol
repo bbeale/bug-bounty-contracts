@@ -26,13 +26,12 @@ contract SolidifiedBugBounty {
         Severity severity;
     }
 
-    // struct Rewards {
-    //     uint256 Critical;
-    //     uint256 Major;
-    //     uint256 Medium;
-    //     uint256 Minor;
-    //     uint256 Suggestion;
-    // }
+    struct Proposal {
+        Severity severity;
+        uint256 timestamp;
+        bytes32 justification;
+        address proponent;
+    }
 
     uint256 constant public automaticApproval = 3 days; 
     uint256 internal projectCount;
@@ -43,7 +42,8 @@ contract SolidifiedBugBounty {
     mapping(uint256 => Project) public projects; //Owner => Id => Project
     mapping(uint256 => mapping(uint256 => Bug)) public bugs; //ProjectId => BugId => Bug
     mapping(uint256 => uint256) public bugCount;
-
+    mapping(uint256 => mapping(uint256 => mapping(uint256 => Proposal))) public proposals; //Project Id, Bug Id, Index Proposal
+    mapping(uint256 => mapping(uint256 => uint256)) public proposalCount;
     mapping(bytes32 => uint256) public objectBalances; //Non-address balances. For Projects is SHA3(owner, projectID), for Bugs is SHA3(ProjectHash, bugId), for arbitration is SHA3(projectHash, bugHash);
 
     event ProjectPosted();
@@ -52,7 +52,7 @@ contract SolidifiedBugBounty {
     event BugAccepted();
 
     constructor(address _dai) public {
-        dai = _dai; 
+        dai = _dai;
         projectCount++;
     }
 
@@ -146,31 +146,60 @@ contract SolidifiedBugBounty {
     function acceptBug(uint256 projectId, uint256 bugId) public {
         require(msg.sender == projects[projectId].owner, "Not authorized");
         require(bugs[projectId][bugId].status == BugStatus.pending);
-        Bug memory bug = bugs[projectId][bugId];
-        bug.status = BugStatus.accepted;
-         bytes32 bugHash = keccak256(abi.encodePacked(projectIdtoHash[projectId], bugId));
-        sendToAddress(bugHash,bug.hunter, bug.value.add(bug.value.div(10)));
-        bugs[projectId][bugId] = bug;
-        emit BugAccepted();
+       _acceptBug(projectId, bugId);
     }
 
     function timeoutAcceptBug(uint256 projectId, uint256 bugId) public {
         require(now.sub(bugs[projectId][bugId].timestamp) >= automaticApproval);
         require(bugs[projectId][bugId].status == BugStatus.pending);
+        _acceptBug(projectId, bugId);
+    }
+
+    function rejectBug(uint256 projectId, uint256 bugId, bytes32 justification, Severity severity) public {
+        require(msg.sender == projects[projectId].owner, "Not authorized");
+        bugs[projectId][bugId].status = BugStatus.negotiation;
+        proposalCount[projectId][bugId]++;
+        proposals[projectId][bugId][proposalCount[projectId][bugId]] = Proposal(severity, now, justification, msg.sender);
+    }
+
+    /** 
+        TODO The following functions are nasty... a lot of refactor is needed 
+    **/
+
+    function acceptProposal(uint256 projectId, uint256 bugId) public {
+        address turn = proposalCount[projectId][bugId] % 2 == 0 ? projects[projectId].owner : bugs[projectId][bugId].hunter;
+        require(msg.sender == turn || (now.sub(proposals[projectId][bugId][proposalCount[projectId][bugId]].timestamp) > automaticApproval));
+        Proposal memory proposal = proposals[projectId][bugId][proposalCount[projectId][bugId]];
         Bug memory bug = bugs[projectId][bugId];
-        bug.status = BugStatus.accepted;
-         bytes32 bugHash = keccak256(abi.encodePacked(projectIdtoHash[projectId], bugId));
-        sendToAddress(bugHash,bug.hunter, bug.value.add(bug.value.div(10)));
+        uint depositDiff = bug.value.div(10).sub(projects[projectId].rewards[uint256(proposal.severity)].div(10));
+        bug.value = projects[projectId].rewards[uint256(proposal.severity)];
         bugs[projectId][bugId] = bug;
+        _acceptBug(projectId, bugId);
+        bytes32 bugHash = keccak256(abi.encodePacked(projectIdtoHash[projectId], bugId));
+        sendToAddress(bugHash,bug.hunter, depositDiff);
+        __transfer(bugHash, projectIdtoHash[projectId],objectBalances[bugHash]);
+    }
+
+    function _acceptBug(uint256 _projectId, uint256 _bugId) internal {
+        Bug memory bug = bugs[_projectId][_bugId];
+        bug.status = BugStatus.accepted;
+        bytes32 bugHash = keccak256(abi.encodePacked(projectIdtoHash[_projectId], _bugId));
+        sendToAddress(bugHash,bug.hunter, bug.value.add(bug.value.div(10)));
+        bugs[_projectId][_bugId] = bug;
         emit BugAccepted();
     }
 
-    // function rejectBug() public{}
+    function counterProposal(uint256 projectId, uint256 bugId, bytes32 justification, Severity severity) public {
+        address turn = proposalCount[projectId][bugId] % 2 == 0 ? projects[projectId].owner : bugs[projectId][bugId].hunter;
+        require(msg.sender == turn);
+        proposalCount[projectId][bugId]++;
+        proposals[projectId][bugId][proposalCount[projectId][bugId]] = Proposal(severity, now, justification, msg.sender);
+    }
 
     /**
             Arbitration Functions
     **/
-    // function sendToArbitration() public {}
+    //function sendToArbitration() public {}
     // function commitVote() public {}
     // function revealVote() public {}
 
@@ -198,6 +227,14 @@ contract SolidifiedBugBounty {
         timestamp = b.timestamp;
         status = b.status;
         bugValue = b.value;
+    }
+
+    function getLatestProposal(uint256 projectId, uint256 bugId) external view returns(address proponent, uint256 timestamp,Severity severity, bytes32 justification) {
+        Proposal memory p = proposals[projectId][bugId][proposalCount[projectId][bugId]];
+        proponent = p.proponent;
+        timestamp = p.timestamp;
+        severity = p.severity;
+        justification = p.justification;
     }
 
     //Helper Functions
