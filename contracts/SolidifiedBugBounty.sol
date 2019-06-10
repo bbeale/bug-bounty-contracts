@@ -33,7 +33,14 @@ contract SolidifiedBugBounty {
         address proponent;
     }
 
+    struct Arbitration {
+        address projectOwner;
+        address owner;
+        uint256 timestamp;
+    }
+
     uint256 constant public automaticApproval = 3 days; 
+    uint256 constant public arbitrationFee = 10 ether;
     uint256 internal projectCount;
     address public dai;
     mapping(address => uint256) public balances;
@@ -199,7 +206,16 @@ contract SolidifiedBugBounty {
     /**
             Arbitration Functions
     **/
-    //function sendToArbitration() public {}
+    function sendToArbitration(uint256 projectId,uint256 bugId) public {
+        require(proposalCount[projectId][bugId] > 1);
+        address turn = proposalCount[projectId][bugId] % 2 == 0 ? projects[projectId].owner : bugs[projectId][bugId].hunter;
+        require(msg.sender == turn);
+        //Debit from calle
+        bytes32 bugHash = keccak256(abi.encodePacked(projectIdtoHash[projectId], bugId));
+        bytes32 arbitrationHash = keccak256(abi.encodePacked(projectIdtoHash[projectId], bugHash));
+        sendToObject(msg.sender, arbitrationHash, arbitrationFee);
+        arbitrations[projectId][bugId] = Arbitration();
+    }
     // function commitVote() public {}
     // function revealVote() public {}
 
