@@ -223,8 +223,7 @@ contract SolidifiedBugBounty {
 
     function acceptArbitration(uint256 projectId,uint256 bugId) public {
         require(proposalCount[projectId][bugId] > 1);
-        address turn = proposalCount[projectId][bugId] % 2 == 0 ? projects[projectId].owner : bugs[projectId][bugId].hunter;
-        require(msg.sender == turn);
+        require(msg.sender == arbitrations[projectId][bugId].defendant);
         bytes32 bugHash = keccak256(abi.encodePacked(projectIdtoHash[projectId], bugId));
         bytes32 arbitrationHash = keccak256(abi.encodePacked(projectIdtoHash[projectId], bugHash));
         sendToObject(msg.sender, arbitrationHash, arbitrationFee);
@@ -235,7 +234,7 @@ contract SolidifiedBugBounty {
         Arbitration memory arbitration = arbitrations[projectId][bugId];
         require(msg.sender != arbitration.plaintiff && msg.sender != arbitration.defendant, "Invalid voter");
         //require that the voter has any reputation
-        require(arbitration.commitPeriod >= now && now >= arbitration.commitPeriod.add(3 days), "Invalid voting period");
+        require(arbitration.commitPeriod <= now && now <= arbitration.commitPeriod.add(3 days), "Invalid voting period");
         bytes32 bugHash = keccak256(abi.encodePacked(projectIdtoHash[projectId], bugId));
         bytes32 arbitrationHash = keccak256(abi.encodePacked(projectIdtoHash[projectId], bugHash));
         sendToObject(msg.sender, arbitrationHash, votingFee);
@@ -274,6 +273,14 @@ contract SolidifiedBugBounty {
         timestamp = p.timestamp;
         severity = p.severity;
         justification = p.justification;
+    }
+
+    function getArbitrationDetails(uint256 projectId, uint256 bugId) external view returns(address plaintiff , address defendant, uint256 timestamp, uint256 commitPeriod) {
+        Arbitration memory a = arbitrations[projectId][bugId];
+        plaintiff = a.plaintiff;
+        defendant = a.defendant;
+        timestamp = a.timestamp;
+        commitPeriod = a.commitPeriod;
     }
 
     //Helper Functions
