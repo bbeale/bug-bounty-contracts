@@ -34,22 +34,26 @@ contract SolidifiedBugBounty {
     }
 
     struct Arbitration {
-        address projectOwner;
-        address owner;
+        address plaintiff;
+        address defendant;
         uint256 timestamp;
+        uint256 commitPeriod;
     }
 
     uint256 constant public automaticApproval = 3 days; 
     uint256 constant public arbitrationFee = 10 ether;
+    uint256 constant public votingFee = 10 ether;
     uint256 internal projectCount;
     address public dai;
     mapping(address => uint256) public balances;
     mapping(uint256 => bytes32) public projectIdtoHash;
-    mapping(uint256 => mapping(uint256 => uint256)) public bugBalances;
     mapping(uint256 => Project) public projects; //Owner => Id => Project
     mapping(uint256 => mapping(uint256 => Bug)) public bugs; //ProjectId => BugId => Bug
     mapping(uint256 => uint256) public bugCount;
     mapping(uint256 => mapping(uint256 => mapping(uint256 => Proposal))) public proposals; //Project Id, Bug Id, Index Proposal
+    mapping(uint256 => mapping(uint256 => Arbitration)) public arbitrations;
+    mapping(bytes32 => mapping(address => bytes32)) public commits;
+    mapping(bytes32 => mapping(address => uint)) public votes; 
     mapping(uint256 => mapping(uint256 => uint256)) public proposalCount;
     mapping(bytes32 => uint256) public objectBalances; //Non-address balances. For Projects is SHA3(owner, projectID), for Bugs is SHA3(ProjectHash, bugId), for arbitration is SHA3(projectHash, bugHash);
 
@@ -210,14 +214,33 @@ contract SolidifiedBugBounty {
         require(proposalCount[projectId][bugId] > 1);
         address turn = proposalCount[projectId][bugId] % 2 == 0 ? projects[projectId].owner : bugs[projectId][bugId].hunter;
         require(msg.sender == turn);
-        //Debit from calle
+        address defendant = proposalCount[projectId][bugId] % 2 == 1 ? projects[projectId].owner : bugs[projectId][bugId].hunter;
         bytes32 bugHash = keccak256(abi.encodePacked(projectIdtoHash[projectId], bugId));
         bytes32 arbitrationHash = keccak256(abi.encodePacked(projectIdtoHash[projectId], bugHash));
         sendToObject(msg.sender, arbitrationHash, arbitrationFee);
-        arbitrations[projectId][bugId] = Arbitration();
+        arbitrations[projectId][bugId] = Arbitration(msg.sender,defendant,now,0);
     }
-    // function commitVote() public {}
-    // function revealVote() public {}
+
+    function acceptArbitration(uint256 projectId,uint256 bugId) public {
+        require(proposalCount[projectId][bugId] > 1);
+        address turn = proposalCount[projectId][bugId] % 2 == 0 ? projects[projectId].owner : bugs[projectId][bugId].hunter;
+        require(msg.sender == turn);
+        bytes32 bugHash = keccak256(abi.encodePacked(projectIdtoHash[projectId], bugId));
+        bytes32 arbitrationHash = keccak256(abi.encodePacked(projectIdtoHash[projectId], bugHash));
+        sendToObject(msg.sender, arbitrationHash, arbitrationFee);
+        arbitrations[projectId][bugId].commitPeriod = now;
+    }
+
+    function commitVote(uint256 projectId,uint256 bugId, bytes32 commit) public {
+        Arbitration memory arbitration = arbitrations[projectId][bugId];
+        require(msg.sender != arbitration.plaintiff && msg.sender != arbitration.defendant, "Invalid voter");
+        //require that the voter has any reputation
+        require(arbitration.commitPeriod >= now && now >= arbitration.commitPeriod.add(3 days), "Invalid voting period");
+        bytes32 bugHash = keccak256(abi.encodePacked(projectIdtoHash[projectId], bugId));
+        bytes32 arbitrationHash = keccak256(abi.encodePacked(projectIdtoHash[projectId], bugHash));
+        sendToObject(msg.sender, arbitrationHash, votingFee);
+        commits[arbitrationHash][msg.sender] = commit;
+    }
 
     /**
             Administrartive Functions
