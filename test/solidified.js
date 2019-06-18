@@ -11,7 +11,7 @@ const {
 
 const distributeDai = async (addresses, daiContract) => {
   addresses.forEach(async add => {
-    await daiContract.transfer(add, new BN("1000000000000000000000"), {
+    await daiContract.transfer(add, ether("10000"), {
       from: addresses[0]
     });
   });
@@ -19,27 +19,12 @@ const distributeDai = async (addresses, daiContract) => {
 
 const depositDai = async (addresses, daiContract, bugBountyContract) => {
   for (const add of addresses) {
-    const amount = new BN("10000000000000000000");
+    const amount = ether("5000");
     await daiContract.approve(bugBountyContract.address, amount, { from: add });
     await bugBountyContract.deposit(amount, {
       from: add
     });
   }
-
-  // addresses.forEach(async add => {
-  //   const amount = new BN("10000000000000000000");
-  //   await daiContract.approve(bugBountyContract.address, amount, { from: add });
-  //   await bugBountyContract.deposit(amount, {
-  //     from: add
-  //   });
-  // });
-  // addresses.forEach(async add => {
-  //   const amount = new BN("10000000000000000000");
-  //   //await daiContract.approve(bugBountyContract.address, amount, { from: add });
-  //   await bugBountyContract.deposit(amount, {
-  //     from: add
-  //   });
-  // });
 };
 
 contract("Solidified Bug Bounty", accounts => {
@@ -320,5 +305,158 @@ contract("Solidified Bug Bounty", accounts => {
       assert.isTrue(project[2].eq(new BN("1")));
       assert.isTrue(project[4].eq(totalPool.sub(bugValue)));
     });
+
+    it("Owner can make counter proposal", async () => {
+      const bugInfo = web3.utils.asciiToHex("Bug Info");
+      const justification = web3.utils.asciiToHex("Justification");
+      const projectId = new BN("1");
+      const severity = new BN("0");
+      const newSeverity = new BN("2");
+      const bugValue = rewards[severity.toNumber()];
+      const hunter = accounts[5];
+      await bugBounty.postBug(bugInfo, projectId, severity, { from: hunter });
+      await bugBounty.rejectBug(projectId, bugId, justification, newSeverity, {
+        from: projectOwner
+      });
+
+      let proposal = await bugBounty.getLatestProposal.call(projectId, bugId);
+      let bug = await bugBounty.getBugDetails.call(projectId, bugId);
+      assert.equal(proposal[0], projectOwner);
+      assert.isTrue(bug[2].eq(new BN("3")));
+    });
+
+    it("Hunter can accept owner proposal", async () => {
+      const bugInfo = web3.utils.asciiToHex("Bug Info");
+      const justification = web3.utils.asciiToHex("Justification");
+      const projectId = new BN("1");
+      const severity = new BN("0");
+      const newSeverity = new BN("2");
+      const bugValue = rewards[newSeverity.toNumber()];
+      const hunter = accounts[5];
+      let previousBalance = await bugBounty.balances.call(hunter);
+      await bugBounty.postBug(bugInfo, projectId, severity, { from: hunter });
+      await bugBounty.rejectBug(projectId, bugId, justification, newSeverity, {
+        from: projectOwner
+      });
+      await bugBounty.acceptProposal(projectId, bugId, { from: hunter });
+      let finalBalance = await bugBounty.balances.call(hunter);
+      let proposal = await bugBounty.getLatestProposal.call(projectId, bugId);
+      let bug = await bugBounty.getBugDetails.call(projectId, bugId);
+      let project = await bugBounty.getProjectDetails(projectId);
+      assert.equal(proposal[0], projectOwner);
+      assert.isTrue(bug[2].eq(new BN("1")));
+      assert.isTrue(previousBalance.eq(finalBalance.sub(bugValue)));
+      assert.isTrue(project[4].eq(totalPool.sub(bugValue)));
+    });
+
+    it("Hunter can make counter proposal", async () => {
+      const bugInfo = web3.utils.asciiToHex("Bug Info");
+      const justification = web3.utils.asciiToHex("Justification");
+      const counterJust = web3.utils.asciiToHex("Counter Justification");
+      const projectId = new BN("1");
+      const severity = new BN("0");
+      const newSeverity = new BN("2");
+      const finalSeverity = new BN("1");
+      const hunter = accounts[5];
+      await bugBounty.postBug(bugInfo, projectId, severity, { from: hunter });
+      await bugBounty.rejectBug(projectId, bugId, justification, newSeverity, {
+        from: projectOwner
+      });
+      await bugBounty.counterProposal(
+        projectId,
+        bugId,
+        counterJust,
+        finalSeverity,
+        { from: hunter }
+      );
+      let proposal = await bugBounty.getLatestProposal.call(projectId, bugId);
+      let bug = await bugBounty.getBugDetails.call(projectId, bugId);
+      assert.equal(proposal[0], hunter);
+      assert.isTrue(bug[2].eq(new BN("3")));
+    });
   }); //Context Posting Bugs
+
+  context("Arbitration", async () => {
+    const totalPool = ether("5");
+    const ipfsHash = web3.utils.asciiToHex("Project Info");
+    const rewards = [
+      ether("3"),
+      ether("2"),
+      ether("1"),
+      ether("0.5"),
+      ether("0.1")
+    ];
+    const projectId = new BN("1");
+    const bugId = new BN("0");
+    const projectOwner = accounts[1];
+    const hunter = accounts[2];
+    const bugInfo = web3.utils.asciiToHex("Bug Info");
+    const severity = new BN("2");
+    const newSeverity = new BN("2");
+    const justification = web3.utils.asciiToHex("Justification");
+    const counterJust = web3.utils.asciiToHex("Counter Justification");
+    const finalSeverity = new BN("1");
+
+    beforeEach(async () => {
+      bugBounty = await BugBounty.new(dai.address);
+      await distributeDai(accounts, dai);
+      await depositDai(accounts, dai, bugBounty);
+
+      await bugBounty.postProject(ipfsHash, totalPool, rewards, {
+        from: projectOwner
+      });
+      await bugBounty.postBug(bugInfo, projectId, severity, { from: hunter });
+
+      await bugBounty.rejectBug(projectId, bugId, justification, newSeverity, {
+        from: projectOwner
+      });
+
+      await bugBounty.counterProposal(
+        projectId,
+        bugId,
+        counterJust,
+        finalSeverity,
+        { from: hunter }
+      );
+    });
+
+    //Check if arbitrations is created correctly
+    it("Any party can send to arbitration", async () => {
+      const plaintiff = projectOwner;
+      const defendant = hunter;
+      await bugBounty.sendToArbitration(projectId, bugId, { from: plaintiff });
+
+      const arb = await bugBounty.getArbitrationDetails(projectId, bugId);
+      assert.equal(arb[0], plaintiff);
+      assert.equal(arb[1], defendant);
+    });
+
+    //reject arbitration
+
+    //timeout reject
+
+    //accept arbitration
+    it("Defendant can accept arbitration", async () => {
+      const plaintiff = projectOwner;
+      const defendant = hunter;
+      await bugBounty.sendToArbitration(projectId, bugId, { from: plaintiff });
+      await bugBounty.acceptArbitration(projectId, bugId, { from: defendant });
+
+      const arb = await bugBounty.getArbitrationDetails(projectId, bugId);
+      assert.equal(arb[0], plaintiff);
+      assert.equal(arb[1], defendant);
+    });
+
+    //vote on arbitration
+    it("Third party can vote on arbitration", async () => {
+      const plaintiff = projectOwner;
+      const defendant = hunter;
+      const voter = accounts[5];
+      await bugBounty.sendToArbitration(projectId, bugId, { from: plaintiff });
+      await bugBounty.acceptArbitration(projectId, bugId, { from: defendant });
+
+      const vote = web3.utils.soliditySha3("1", "666");
+      await bugBounty.commitVote(projectId, bugId, vote, { from: voter });
+    });
+  }); //Context Arbitration
 });
