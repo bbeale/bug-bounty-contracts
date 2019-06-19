@@ -149,7 +149,12 @@ contract("Solidified Bug Bounty", accounts => {
     });
 
     it("User can pull posted contracts", async () => {
-      const projectId = "1";
+      const projectId = web3.utils.soliditySha3(
+        { t: "address", v: accounts[4] },
+        { t: "uint256", v: 1 }
+      );
+      console.log(projectId);
+
       const totalPool = ether("5");
       const ipfsHash = web3.utils.asciiToHex("Project Info");
       const rewards = [
