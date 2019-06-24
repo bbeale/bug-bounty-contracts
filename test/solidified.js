@@ -90,7 +90,11 @@ contract("Solidified Bug Bounty", accounts => {
     });
 
     it("User can post contract", async () => {
-      const projectId = "1";
+      const projectId = web3.utils.soliditySha3(
+        { t: "address", v: accounts[3] },
+        { t: "uint256", v: 1 }
+      );
+      //const projectId = "1";
       const totalPool = ether("5");
       const ipfsHash = web3.utils.asciiToHex("Project Info");
       const rewards = [
@@ -153,7 +157,6 @@ contract("Solidified Bug Bounty", accounts => {
         { t: "address", v: accounts[4] },
         { t: "uint256", v: 1 }
       );
-      console.log(projectId);
 
       const totalPool = ether("5");
       const ipfsHash = web3.utils.asciiToHex("Project Info");
@@ -178,7 +181,10 @@ contract("Solidified Bug Bounty", accounts => {
     });
 
     it("It fails when non-owner pulls contract", async () => {
-      const projectId = "1";
+      const projectId = web3.utils.soliditySha3(
+        { t: "address", v: accounts[4] },
+        { t: "uint256", v: 1 }
+      );
       const totalPool = ether("5");
       const ipfsHash = web3.utils.asciiToHex("Project Info");
       const rewards = [
@@ -201,7 +207,10 @@ contract("Solidified Bug Bounty", accounts => {
     });
 
     it("Owner can can increase project pool", async () => {
-      const projectId = "1";
+      const projectId = web3.utils.soliditySha3(
+        { t: "address", v: accounts[4] },
+        { t: "uint256", v: 1 }
+      );
       const totalPool = ether("5");
       const ipfsHash = web3.utils.asciiToHex("Project Info");
       const rewards = [
@@ -236,10 +245,15 @@ contract("Solidified Bug Bounty", accounts => {
       ether("0.5"),
       ether("0.1")
     ];
-    const projectId = new BN("1");
-    const bugId = new BN("0");
     const projectOwner = accounts[1];
-
+    const projectId = web3.utils.soliditySha3(
+      { t: "address", v: projectOwner },
+      { t: "uint256", v: 1 }
+    );
+    const bugId = web3.utils.soliditySha3(
+      { t: "bytes32", v: projectId },
+      { t: "uint256", v: 0 }
+    );
     beforeEach(async () => {
       bugBounty = await BugBounty.new(dai.address);
       await distributeDai(accounts, dai);
@@ -259,7 +273,7 @@ contract("Solidified Bug Bounty", accounts => {
       let previousBalance = await bugBounty.balances.call(hunter);
       await bugBounty.postBug(bugInfo, projectId, severity, { from: hunter });
       let finalBalance = await bugBounty.balances.call(hunter);
-      let bug = await bugBounty.getBugDetails.call(projectId, bugId);
+      let bug = await bugBounty.getBugDetails.call(bugId);
       assert.equal(bug[0], hunter);
       assert.isTrue(bug[2].isZero());
       assert.isTrue(bug[3].eq(bugValue));
@@ -270,7 +284,6 @@ contract("Solidified Bug Bounty", accounts => {
 
     it("Project owner can accept bug", async () => {
       const bugInfo = web3.utils.asciiToHex("Bug Info");
-      const projectId = new BN("1");
       const severity = new BN("0");
       const bugValue = rewards[severity.toNumber()];
       const hunter = accounts[5];
@@ -280,7 +293,7 @@ contract("Solidified Bug Bounty", accounts => {
       await bugBounty.acceptBug(projectId, bugId, { from: projectOwner });
 
       let finalBalance = await bugBounty.balances.call(hunter);
-      let bug = await bugBounty.getBugDetails.call(projectId, bugId);
+      let bug = await bugBounty.getBugDetails.call(bugId);
       let project = await bugBounty.getProjectDetails(projectId);
       assert.equal(bug[0], hunter);
       assert.isTrue(bug[2].eq(new BN("1")));
@@ -291,7 +304,6 @@ contract("Solidified Bug Bounty", accounts => {
 
     it("Bug can accept if timeout has passed", async () => {
       const bugInfo = web3.utils.asciiToHex("Bug Info");
-      const projectId = new BN("1");
       const severity = new BN("0");
       const bugValue = rewards[severity.toNumber()];
       const hunter = accounts[5];
@@ -302,7 +314,7 @@ contract("Solidified Bug Bounty", accounts => {
       await bugBounty.timeoutAcceptBug(projectId, bugId);
 
       let finalBalance = await bugBounty.balances.call(hunter);
-      let bug = await bugBounty.getBugDetails.call(projectId, bugId);
+      let bug = await bugBounty.getBugDetails.call(bugId);
       let project = await bugBounty.getProjectDetails(projectId);
       assert.equal(bug[0], hunter);
       assert.isTrue(bug[2].eq(new BN("1")));
@@ -314,7 +326,6 @@ contract("Solidified Bug Bounty", accounts => {
     it("Owner can make counter proposal", async () => {
       const bugInfo = web3.utils.asciiToHex("Bug Info");
       const justification = web3.utils.asciiToHex("Justification");
-      const projectId = new BN("1");
       const severity = new BN("0");
       const newSeverity = new BN("2");
       const bugValue = rewards[severity.toNumber()];
@@ -324,8 +335,8 @@ contract("Solidified Bug Bounty", accounts => {
         from: projectOwner
       });
 
-      let proposal = await bugBounty.getLatestProposal.call(projectId, bugId);
-      let bug = await bugBounty.getBugDetails.call(projectId, bugId);
+      let proposal = await bugBounty.getLatestProposal.call(bugId);
+      let bug = await bugBounty.getBugDetails.call(bugId);
       assert.equal(proposal[0], projectOwner);
       assert.isTrue(bug[2].eq(new BN("3")));
     });
@@ -333,7 +344,6 @@ contract("Solidified Bug Bounty", accounts => {
     it("Hunter can accept owner proposal", async () => {
       const bugInfo = web3.utils.asciiToHex("Bug Info");
       const justification = web3.utils.asciiToHex("Justification");
-      const projectId = new BN("1");
       const severity = new BN("0");
       const newSeverity = new BN("2");
       const bugValue = rewards[newSeverity.toNumber()];
@@ -345,8 +355,8 @@ contract("Solidified Bug Bounty", accounts => {
       });
       await bugBounty.acceptProposal(projectId, bugId, { from: hunter });
       let finalBalance = await bugBounty.balances.call(hunter);
-      let proposal = await bugBounty.getLatestProposal.call(projectId, bugId);
-      let bug = await bugBounty.getBugDetails.call(projectId, bugId);
+      let proposal = await bugBounty.getLatestProposal.call(bugId);
+      let bug = await bugBounty.getBugDetails.call(bugId);
       let project = await bugBounty.getProjectDetails(projectId);
       assert.equal(proposal[0], projectOwner);
       assert.isTrue(bug[2].eq(new BN("1")));
@@ -358,7 +368,6 @@ contract("Solidified Bug Bounty", accounts => {
       const bugInfo = web3.utils.asciiToHex("Bug Info");
       const justification = web3.utils.asciiToHex("Justification");
       const counterJust = web3.utils.asciiToHex("Counter Justification");
-      const projectId = new BN("1");
       const severity = new BN("0");
       const newSeverity = new BN("2");
       const finalSeverity = new BN("1");
@@ -374,8 +383,8 @@ contract("Solidified Bug Bounty", accounts => {
         finalSeverity,
         { from: hunter }
       );
-      let proposal = await bugBounty.getLatestProposal.call(projectId, bugId);
-      let bug = await bugBounty.getBugDetails.call(projectId, bugId);
+      let proposal = await bugBounty.getLatestProposal.call(bugId);
+      let bug = await bugBounty.getBugDetails.call(bugId);
       assert.equal(proposal[0], hunter);
       assert.isTrue(bug[2].eq(new BN("3")));
     });
@@ -391,10 +400,21 @@ contract("Solidified Bug Bounty", accounts => {
       ether("0.5"),
       ether("0.1")
     ];
-    const projectId = new BN("1");
-    const bugId = new BN("0");
+
     const projectOwner = accounts[1];
     const hunter = accounts[2];
+    const projectId = web3.utils.soliditySha3(
+      { t: "address", v: projectOwner },
+      { t: "uint256", v: 1 }
+    );
+    const bugId = web3.utils.soliditySha3(
+      { t: "bytes32", v: projectId },
+      { t: "uint256", v: 0 }
+    );
+    const arbitrationId = web3.utils.soliditySha3(
+      { t: "bytes32", v: projectId },
+      { t: "bytes32", v: bugId }
+    );
     const bugInfo = web3.utils.asciiToHex("Bug Info");
     const severity = new BN("2");
     const newSeverity = new BN("2");
@@ -431,7 +451,7 @@ contract("Solidified Bug Bounty", accounts => {
       const defendant = hunter;
       await bugBounty.sendToArbitration(projectId, bugId, { from: plaintiff });
 
-      const arb = await bugBounty.getArbitrationDetails(projectId, bugId);
+      const arb = await bugBounty.getArbitrationDetails(arbitrationId);
       assert.equal(arb[0], plaintiff);
       assert.equal(arb[1], defendant);
     });
@@ -445,9 +465,9 @@ contract("Solidified Bug Bounty", accounts => {
       const plaintiff = projectOwner;
       const defendant = hunter;
       await bugBounty.sendToArbitration(projectId, bugId, { from: plaintiff });
-      await bugBounty.acceptArbitration(projectId, bugId, { from: defendant });
+      await bugBounty.acceptArbitration(arbitrationId, { from: defendant });
 
-      const arb = await bugBounty.getArbitrationDetails(projectId, bugId);
+      const arb = await bugBounty.getArbitrationDetails(arbitrationId);
       assert.equal(arb[0], plaintiff);
       assert.equal(arb[1], defendant);
     });
@@ -458,10 +478,10 @@ contract("Solidified Bug Bounty", accounts => {
       const defendant = hunter;
       const voter = accounts[5];
       await bugBounty.sendToArbitration(projectId, bugId, { from: plaintiff });
-      await bugBounty.acceptArbitration(projectId, bugId, { from: defendant });
+      await bugBounty.acceptArbitration(arbitrationId, { from: defendant });
 
       const vote = web3.utils.soliditySha3("1", "666");
-      await bugBounty.commitVote(projectId, bugId, vote, { from: voter });
+      await bugBounty.commitVote(arbitrationId, vote, { from: voter });
     });
   }); //Context Arbitration
 });

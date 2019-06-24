@@ -153,11 +153,11 @@ contract SolidifiedBugBounty {
     function postBug(bytes32 bugDescription, bytes32 projectId, Severity severity) public returns(bytes32 bugId) {
         uint256 bugNumber = bugCount[projectId];
         uint256 bugValue = projects[projectId].rewards[uint256(severity)];
-        bugId = keccak256(abi.encodePacked(projects[projectId], bugNumber));
+        bugId = keccak256(abi.encodePacked(projectId, bugNumber));
         bugs[bugId] = Bug(msg.sender, now, bugValue, BugStatus.pending, severity);
         sendToObject(msg.sender, bugId, bugValue.div(BUG_STAKE));
         __transfer(projectId, bugId, bugValue);
-        bugNumber[projectId] = bugNumber[projectId].add(1);
+        bugCount[projectId] = bugCount[projectId].add(1);
         if(objectBalances[projectId] < projects[projectId].rewards[0]){
             projects[projectId].status = ProjectStatus.unfunded;
         }
