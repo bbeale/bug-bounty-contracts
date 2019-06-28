@@ -24,6 +24,7 @@ contract SolidifiedBugBounty {
         uint256 value;
         BugStatus status;
         Severity severity;
+        bytes32 projectId;
     }
 
     struct Proposal {
@@ -38,6 +39,12 @@ contract SolidifiedBugBounty {
         address defendant;
         uint256 timestamp;
         uint256 commitPeriod;
+        bytes32 bugId;
+    }
+
+    struct Vote {
+       address owner;
+       uint8 vot;
     }
 
     uint256 constant public INTERIM = 3 days;
@@ -47,6 +54,7 @@ contract SolidifiedBugBounty {
 
     address public dai;
 
+    mapping(address => uint256) public reputation;
     mapping(address => uint256) public balances;
     mapping(bytes32 => uint256) public objectBalances;
 
@@ -64,7 +72,7 @@ contract SolidifiedBugBounty {
     uint256 internal projectCount;
 
     mapping(bytes32 => mapping(address => bytes32)) public commits;
-    mapping(bytes32 => mapping(address => uint)) public votes;
+    mapping(bytes32 => Vote[5]) public votes;
 
     event ProjectPosted(bytes32 Id, address Owner);
     event ProjectPulled(bytes32 Id, address Owner, uint256 time);
@@ -72,6 +80,7 @@ contract SolidifiedBugBounty {
     event Deposit();
     event Withdraw();
     event BugAccepted();
+    event BugRejected();
 
     constructor(address _dai) public {
         dai = _dai;
@@ -154,7 +163,7 @@ contract SolidifiedBugBounty {
         uint256 bugNumber = bugCount[projectId];
         uint256 bugValue = projects[projectId].rewards[uint256(severity)];
         bugId = keccak256(abi.encodePacked(projectId, bugNumber));
-        bugs[bugId] = Bug(msg.sender, now, bugValue, BugStatus.pending, severity);
+        bugs[bugId] = Bug(msg.sender, now, bugValue, BugStatus.pending, severity, projectId);
         sendToObject(msg.sender, bugId, bugValue.div(BUG_STAKE));
         __transfer(projectId, bugId, bugValue);
         bugCount[projectId] = bugCount[projectId].add(1);
@@ -167,13 +176,13 @@ contract SolidifiedBugBounty {
     function acceptBug(bytes32 projectId, bytes32 bugId) public {
         require(msg.sender == projects[projectId].owner, "Not authorized");
         require(bugs[bugId].status == BugStatus.pending, "Bug in the wrong status");
-       _acceptBug(projectId, bugId);
+       _acceptBug(bugId);
     }
 
     function timeoutAcceptBug(bytes32 projectId, bytes32 bugId) public {
         require(now.sub(bugs[bugId].timestamp) >= INTERIM, "No correct time");
         require(bugs[bugId].status == BugStatus.pending, "Bug should be pending" );
-        _acceptBug(projectId, bugId);
+        _acceptBug(bugId);
     }
 
     function rejectBug(bytes32 projectId, bytes32 bugId, bytes32 justification, Severity severity) public {
@@ -195,17 +204,25 @@ contract SolidifiedBugBounty {
         uint depositDiff = bug.value.div(BUG_STAKE).sub(projects[projectId].rewards[uint256(proposal.severity)].div(BUG_STAKE));
         bug.value = projects[projectId].rewards[uint256(proposal.severity)];
         bugs[bugId] = bug;
-        _acceptBug(projectId, bugId);
+        _acceptBug(bugId);
         sendToAddress(bugId,bug.hunter, depositDiff);
         __transfer(bugId, projectId, objectBalances[bugId]);
     }
 
-    function _acceptBug(bytes32 _projectId, bytes32 _bugId) internal {
+    function _acceptBug(bytes32 _bugId) internal {
         Bug memory bug = bugs[_bugId];
         bug.status = BugStatus.accepted;
         sendToAddress(_bugId,bug.hunter, bug.value.add(bug.value.div(BUG_STAKE)));
         bugs[_bugId] = bug;
         emit BugAccepted();
+    }
+
+    function _rejectBug(bytes32 _bugId) internal {
+        Bug memory bug = bugs[_bugId];
+        bug.status = BugStatus.rejected;
+        __transfer(_bugId, bug.projectId, objectBalances[_bugId]);
+        bugs[_bugId] = bug;
+        emit BugRejected();
     }
 
     function counterProposal(bytes32 projectId, bytes32 bugId, bytes32 justification, Severity severity) public {
@@ -224,13 +241,21 @@ contract SolidifiedBugBounty {
         require(msg.sender == plaintiff, "Invalid Sender");
         arbitrationId = keccak256(abi.encodePacked(projectId, bugId));
         sendToObject(msg.sender, arbitrationId, ARBITRATION_FEE);
-        arbitrations[arbitrationId] = Arbitration(msg.sender,defendant,now,0);
+        arbitrations[arbitrationId] = Arbitration(msg.sender,defendant,now,0, bugId);
     }
 
     function acceptArbitration(bytes32 arbitrationId) public {
         require(msg.sender == arbitrations[arbitrationId].defendant);
         sendToObject(msg.sender, arbitrationId, ARBITRATION_FEE);
         arbitrations[arbitrationId].commitPeriod = now;
+    }
+
+    function rejectArbitration(bytes32 arbitrationId) public {
+        Arbitration memory arb = arbitrations[arbitrationId];
+        require(msg.sender == arb.defendant, "Invalid msg.sender");
+        sendToAddress(arbitrationId, arb.plaintiff, ARBITRATION_FEE);
+        __transfer(arbitrationId, arb.bugId, objectBalances[arbitrationId]);
+        arb.plaintiff == bugs[arb.bugId].hunter ? _acceptBug(arb.bugId) : _rejectBug(arb.bugId);
     }
 
     function commitVote(bytes32 arbitrationId, bytes32 commit) public {
@@ -242,6 +267,20 @@ contract SolidifiedBugBounty {
         commits[arbitrationId][msg.sender] = commit;
     }
 
+    function revealVote(bytes32 arbitrationId, uint256 vote, bytes32 salt) public {
+        require(vote < 2);
+        Arbitration memory arb = arbitrations[arbitrationId];
+        require(now >= arb.commitPeriod.add(INTERIM));
+        bool validVote = keccak256(abi.encodePacked(vote, salt)) == commits[arbitrationId][msg.sender];
+        if(validVote && canVote(msg.sender, arbitrationId)) {
+            votes[arbitrationId] = insertVote(Vote(msg.sender, uint8(vote)),votes[arbitrationId]);
+        }
+    }
+
+    function slashCommit(bytes32 arbitrationId, bytes32 salt, address voter) public {
+
+    }
+
     /**
             Administrartive Functions
     **/
@@ -249,6 +288,23 @@ contract SolidifiedBugBounty {
     // function changeFee() public {}
     // function flagBugAsRepetivie() public {}
 
+    function insertVote(Vote memory vote, Vote[5] memory voteArray) internal returns(Vote[5] memory) {
+       voteArray[4] = vote;
+       for(uint i = 4; i > 0; i++){
+           if(reputation[voteArray[i].owner] < reputation[vote.owner]) break;
+           (voteArray[i-1], voteArray[i]) = (voteArray[i], voteArray[i-1]);
+       }
+       return voteArray;
+    }
+
+    function canVote(address voter, bytes32 arbitrationId) public view returns(bool){
+        if(reputation[votes[arbitrationId][4].owner] < reputation[msg.sender]) return false;
+        bool voted;
+        for(uint256 i = 0; i < 5; i++) {
+            if(votes[arbitrationId][i].owner == msg.sender) voted = true;
+        }
+        return !voted;
+    }
 
     //getters
     function getProjectDetails(bytes32 projectId)
