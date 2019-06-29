@@ -59,8 +59,8 @@ contract SolidifiedBugBounty {
     mapping(bytes32 => uint256) public objectBalances;
 
     mapping(uint256 => bytes32) public projectNumberToId;
-    mapping(uint256 => mapping(uint256 => bytes32)) public bugNumberToId;
-    mapping(uint256 => mapping(uint256 => bytes32)) public arbitrationNumberToId;
+    mapping(bytes32 => mapping(uint256 => bytes32)) public bugNumberToId;
+    mapping(bytes32 => mapping(uint256 => bytes32)) public arbitrationNumberToId;
 
     mapping(bytes32 => Project) public projects;
     mapping(bytes32 => Bug) public bugs;
@@ -181,7 +181,7 @@ contract SolidifiedBugBounty {
 
     function timeoutAcceptBug(bytes32 projectId, bytes32 bugId) public {
         require(now.sub(bugs[bugId].timestamp) >= INTERIM, "No correct time");
-        require(bugs[bugId].status == BugStatus.pending, "Bug should be pending" );
+        require(bugs[bugId].status == BugStatus.pending, "Bug should be pending");
         _acceptBug(bugId);
     }
 
@@ -191,10 +191,6 @@ contract SolidifiedBugBounty {
         proposalCount[bugId]++;
         proposals[bugId][proposalCount[bugId]] = Proposal(severity, now, justification, msg.sender);
     }
-
-    /**
-        TODO The following functions are nasty... a lot of refactor is needed
-    **/
 
     function acceptProposal(bytes32 projectId, bytes32 bugId) public {
         (address turn , ) = inTurn(projectId, bugId);
@@ -267,15 +263,15 @@ contract SolidifiedBugBounty {
         commits[arbitrationId][msg.sender] = commit;
     }
 
-    function revealVote(bytes32 arbitrationId, uint256 vote, bytes32 salt) public {
-        require(vote < 2);
-        Arbitration memory arb = arbitrations[arbitrationId];
-        require(now >= arb.commitPeriod.add(INTERIM));
-        bool validVote = keccak256(abi.encodePacked(vote, salt)) == commits[arbitrationId][msg.sender];
-        if(validVote && canVote(msg.sender, arbitrationId)) {
-            votes[arbitrationId] = insertVote(Vote(msg.sender, uint8(vote)),votes[arbitrationId]);
-        }
-    }
+    // function revealVote(bytes32 arbitrationId, uint256 vote, bytes32 salt) public {
+    //     require(vote < 2);
+    //     Arbitration memory arb = arbitrations[arbitrationId];
+    //     require(now >= arb.commitPeriod.add(INTERIM));
+    //     bool validVote = keccak256(abi.encodePacked(vote, salt)) == commits[arbitrationId][msg.sender];
+    //     if(validVote && canVote(msg.sender, arbitrationId)) {
+    //         votes[arbitrationId] = insertVote(Vote(msg.sender, uint8(vote)),votes[arbitrationId]);
+    //     }
+    // }
 
     function slashCommit(bytes32 arbitrationId, bytes32 salt, address voter) public {
 
