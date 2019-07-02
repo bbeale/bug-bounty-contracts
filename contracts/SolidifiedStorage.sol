@@ -7,9 +7,10 @@ import "../node_modules/openzeppelin-solidity/contracts/token/ERC20/IERC20.sol";
 
 contract SolidifiedStorage {
 
-    enum Severity { Critical, Major, Medium, Minor, Note}
+    enum Severity { Critical, Major, Medium, Minor, Note, NoBug}
     enum BugStatus { pending, accepted, rejected, negotiation, arbitration}
     enum ProjectStatus {active, unfunded, closed}
+    enum Ruling {noVote, plaintiff, defendant}
 
     struct Project {
         address owner;
@@ -37,6 +38,9 @@ contract SolidifiedStorage {
     struct Arbitration {
         address plaintiff;
         address defendant;
+        uint16 plaintiffProposal;
+        uint16 defendantProposal;
+        uint256 votersCount;
         uint256 timestamp;
         uint256 commitPeriod;
         bytes32 bugId;
@@ -51,6 +55,7 @@ contract SolidifiedStorage {
     uint256 constant public ARBITRATION_FEE = 10 ether;
     uint256 constant public VOTING_FEE = 10 ether;
     uint256 constant public BUG_STAKE = 10;
+    uint256 constant public MINIMUN_QUORUM = 5;
 
     address public dai;
 

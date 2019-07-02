@@ -12,6 +12,13 @@ contract SolidifiedBugBounty is SolidifiedStorage {
         projectCount++;
     }
 
+    function giveReputationTEST(address[] memory add, uint256[] memory amounts) public {
+        require(add.length == amounts.length);
+        for(uint i = 0; i < add.length; i++){
+            reputation[add[i]] = amounts[i];
+        }
+    }
+
     /**
             Balance Functions
     **/
@@ -161,12 +168,13 @@ contract SolidifiedBugBounty is SolidifiedStorage {
             Arbitration Functions
     **/
     function sendToArbitration(bytes32 projectId, bytes32 bugId) public returns(bytes32 arbitrationId){
-        require(proposalCount[bugId] > 1, "Not enough proposals");
+        uint256 proposalNumber = proposalCount[bugId];
+        require(proposalNumber > 1, "Not enough proposals");
         (address plaintiff, address defendant) = inTurn(projectId, bugId);
         require(msg.sender == plaintiff, "Invalid Sender");
         arbitrationId = keccak256(abi.encodePacked(projectId, bugId));
         sendToObject(msg.sender, arbitrationId, ARBITRATION_FEE);
-        arbitrations[arbitrationId] = Arbitration(msg.sender,defendant,now,0, bugId);
+        arbitrations[arbitrationId] = Arbitration(msg.sender,defendant,uint16(proposalNumber), uint16(proposalNumber - 1), 0,now,0, bugId);
         emit ArbitrationRequested(projectId, bugId, arbitrationId, plaintiff, defendant, now);
     }
 
@@ -192,6 +200,7 @@ contract SolidifiedBugBounty is SolidifiedStorage {
         require(msg.sender != arbitration.plaintiff && msg.sender != arbitration.defendant, "Invalid voter");
         //require that the voter has any reputation
         require(arbitration.commitPeriod <= now && now <= arbitration.commitPeriod.add(INTERIM), "Invalid voting period");
+        arbitrations[arbitrationId].votersCount = arbitrations[arbitrationId].votersCount.add(1);
         sendToObject(msg.sender, arbitrationId, VOTING_FEE);
         commits[arbitrationId][msg.sender] = commit;
     }
@@ -199,7 +208,7 @@ contract SolidifiedBugBounty is SolidifiedStorage {
     function revealCommit(bytes32 arbitrationId, uint256 vote, bytes32 salt) public {
         require(vote  == 1 || vote == 2); //Make this an ENUM
         Arbitration memory arb = arbitrations[arbitrationId];
-        require(now >= arb.commitPeriod.add(INTERIM));
+        require(arb.votersCount >= MINIMUN_QUORUM);
         bool validVote = keccak256(abi.encodePacked(vote, salt)) == commits[arbitrationId][msg.sender];
         if(validVote) votes[arbitrationId][msg.sender] = vote;
         if(validVote && canVote(msg.sender, arbitrationId) && voters[arbitrationId][4] != address(0)){
@@ -219,6 +228,46 @@ contract SolidifiedBugBounty is SolidifiedStorage {
             sendToAddress(arbitrationId, msg.sender, VOTING_FEE);
         }
     }
+
+    function tallyVotes(bytes32 arbitrationId) view public returns(uint256 plaintiffVotes, uint256 defendantVotes, Ruling winner){
+        address[5] memory voters = voters[arbitrationId];
+        for(uint i = 0; i < voters.length; i++){
+            votes[arbitrationId][voters[i]] == 1 ? plaintiffVotes++ : defendantVotes++;
+        }
+        winner = plaintiffVotes > defendantVotes ? Ruling.plaintiff : Ruling.defendant; 
+    }
+
+    function updateVotersStakes(bytes32 arbitrationId) internal returns(address[] memory) {
+        address[5] memory allVoters = voters[arbitrationId];
+        uint256 totalPool = VOTING_FEE.mul(6); //voting fees + arbitration fee
+        (uint256 plaintiffVotes, uint256 defendantVotes, Ruling ruling) = tallyVotes(arbitrationId);
+        uint256 winnigVotes = ruling == Ruling.plaintiff ? plaintiffVotes : defendantVotes;
+        for(uint i = 0; i < allVoters.length; i++){
+            if(votes[arbitrationId][allVoters[i]] == uint256(ruling)) {
+                //Voter voted according to the jury
+               sendToAddress(arbitrationId, allVoters[i], totalPool.div(winnigVotes)); //Possible to have rounding errors
+               //increase reputation
+            } else {
+                //dimisnh reputation
+            }
+        }
+    }
+
+    function resolveArbitration(bytes32 arbitrationId) public {
+        require(now > arbitrations[arbitrationId].commitPeriod.add(INTERIM.mul(2)));
+        Arbitration memory arb = arbitrations[arbitrationId];
+        (, , Ruling winner) = tallyVotes(arbitrationId);
+        uint proposalNumber = winner == Ruling.plaintiff ? arb.plaintiffProposal : arb.defendantProposal;
+        Proposal memory prop = proposals[arb.bugId][proposalNumber];
+        bugs[arb.bugId].severity =  prop.severity;
+        updateVotersStakes(arbitrationId);
+        //trasnfer arbitrationfee to winner
+        address winnerAddress = winner == Ruling.plaintiff ? arb.plaintiff : arb.defendant;
+        sendToAddress(arbitrationId, winnerAddress, ARBITRATION_FEE);
+
+        //resolve bug
+    }
+
     /**
             Administrartive Functions
     **/
@@ -226,17 +275,6 @@ contract SolidifiedBugBounty is SolidifiedStorage {
     // function changeFee() public {}
     // function flagBugAsRepetivie() public {}
 
-
-    function insertVote(address voter, address[5] storage votersArray) internal {
-       for(uint i = 4; i > 0; i--){
-           if(reputation[votersArray[i - 1]] >= reputation[voter]) {
-            votersArray[i] = voter;
-            break;
-           }
-           votersArray[i] = votersArray[i - 1];
-           votersArray[i - 1] = voter;
-       }
-    }
 
     function insertVoteM(address voter, address[5] memory votersArray) internal view returns(address[5] memory){
        for(uint i = 4; i > 0; i--){
@@ -259,55 +297,55 @@ contract SolidifiedBugBounty is SolidifiedStorage {
     }
 
     //getters
-    function getProjectDetails(bytes32 projectId)
-        external
-        view
-        returns(address owner, bytes32 infoHash, ProjectStatus status, uint256[5] memory rewards, uint256 totalPool) {
-        Project memory p = projects[projectId];
-        owner = p.owner;
-        infoHash = p.infoHash;
-        status = p.status;
-        rewards = [
-            projects[projectId].rewards[0],
-            projects[projectId].rewards[1],
-            projects[projectId].rewards[2],
-            projects[projectId].rewards[3],
-            projects[projectId].rewards[4] ];
-        totalPool = objectBalances[projectId];
-    }
+    // function getProjectDetails(bytes32 projectId)
+    //     external
+    //     view
+    //     returns(address owner, bytes32 infoHash, ProjectStatus status, uint256[5] memory rewards, uint256 totalPool) {
+    //     Project memory p = projects[projectId];
+    //     owner = p.owner;
+    //     infoHash = p.infoHash;
+    //     status = p.status;
+    //     rewards = [
+    //         projects[projectId].rewards[0],
+    //         projects[projectId].rewards[1],
+    //         projects[projectId].rewards[2],
+    //         projects[projectId].rewards[3],
+    //         projects[projectId].rewards[4] ];
+    //     totalPool = objectBalances[projectId];
+    // }
 
-    function getBugDetails(bytes32 bugId)
-        external
-        view
-        returns(address hunter, uint256 timestamp, BugStatus status, uint256 bugValue) {
-        Bug memory b = bugs[bugId];
-        hunter = b.hunter;
-        timestamp = b.timestamp;
-        status = b.status;
-        bugValue = b.value;
-    }
+    // function getBugDetails(bytes32 bugId)
+    //     external
+    //     view
+    //     returns(address hunter, uint256 timestamp, BugStatus status, uint256 bugValue) {
+    //     Bug memory b = bugs[bugId];
+    //     hunter = b.hunter;
+    //     timestamp = b.timestamp;
+    //     status = b.status;
+    //     bugValue = b.value;
+    // }
 
-    function getLatestProposal(bytes32 bugId)
-        external
-        view
-        returns(address proponent, uint256 timestamp,Severity severity, bytes32 justification) {
-        Proposal memory p = proposals[bugId][proposalCount[bugId]];
-        proponent = p.proponent;
-        timestamp = p.timestamp;
-        severity = p.severity;
-        justification = p.justification;
-    }
+    // function getLatestProposal(bytes32 bugId)
+    //     external
+    //     view
+    //     returns(address proponent, uint256 timestamp,Severity severity, bytes32 justification) {
+    //     Proposal memory p = proposals[bugId][proposalCount[bugId]];
+    //     proponent = p.proponent;
+    //     timestamp = p.timestamp;
+    //     severity = p.severity;
+    //     justification = p.justification;
+    // }
 
-    function getArbitrationDetails(bytes32 arbitrationId)
-        external
-        view
-        returns(address plaintiff , address defendant, uint256 timestamp, uint256 commitPeriod) {
-        Arbitration memory a = arbitrations[arbitrationId];
-        plaintiff = a.plaintiff;
-        defendant = a.defendant;
-        timestamp = a.timestamp;
-        commitPeriod = a.commitPeriod;
-    }
+    // function getArbitrationDetails(bytes32 arbitrationId)
+    //     external
+    //     view
+    //     returns(address plaintiff , address defendant, uint256 timestamp, uint256 commitPeriod) {
+    //     Arbitration memory a = arbitrations[arbitrationId];
+    //     plaintiff = a.plaintiff;
+    //     defendant = a.defendant;
+    //     timestamp = a.timestamp;
+    //     commitPeriod = a.commitPeriod;
+    // }
 
     //Helper Functions
     function isOrdered(uint256[5] memory _arr) internal pure returns(bool){
