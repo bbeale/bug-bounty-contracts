@@ -1,4 +1,5 @@
 const BugBounty = artifacts.require("SolidifiedBugBounty");
+const SolidifiedProxy = artifacts.require("SolidifiedProxy");
 const Dai = artifacts.require("MockDai");
 const {
   BN,
@@ -27,6 +28,13 @@ const depositDai = async (addresses, daiContract, bugBountyContract) => {
   }
 };
 
+const deployBugBounty = async daiAddress => {
+  let implementation = await BugBounty.new(daiAddress);
+  let proxy = await new SolidifiedProxy(implementation.address);
+  let bugBounty = await BugBounty.at(proxy.address);
+  return bugBounty;
+};
+
 contract("Solidified Bug Bounty", accounts => {
   let dai,
     bugBounty = {};
@@ -37,7 +45,9 @@ contract("Solidified Bug Bounty", accounts => {
 
   context("Deployment", async () => {
     it("Deploys Correctly", async () => {
-      bugBounty = await BugBounty.new(dai.address);
+      let implementation = await BugBounty.new(dai.address);
+      let proxy = await new SolidifiedProxy(implementation.address);
+      bugBounty = await BugBounty.at(proxy.address);
       let daiAddress = await bugBounty.dai.call();
       assert.equal(daiAddress, dai.address, "Should have correct Dai address");
     });
@@ -45,7 +55,7 @@ contract("Solidified Bug Bounty", accounts => {
 
   context("Depositing and Withdrawing tokens", async () => {
     beforeEach(async () => {
-      bugBounty = await BugBounty.new(dai.address);
+      bugBounty = await deployBugBounty(dai.address);
       await distributeDai(accounts, dai);
     });
 
@@ -84,7 +94,7 @@ contract("Solidified Bug Bounty", accounts => {
 
   context("Posting and Managing Projects", async () => {
     beforeEach(async () => {
-      bugBounty = await BugBounty.new(dai.address);
+      bugBounty = await deployBugBounty(dai.address);
       await distributeDai(accounts, dai);
       await depositDai(accounts, dai, bugBounty);
     });
@@ -255,7 +265,7 @@ contract("Solidified Bug Bounty", accounts => {
       { t: "uint256", v: 0 }
     );
     beforeEach(async () => {
-      bugBounty = await BugBounty.new(dai.address);
+      bugBounty = await deployBugBounty(dai.address);
       await distributeDai(accounts, dai);
       await depositDai(accounts, dai, bugBounty);
 
@@ -423,7 +433,7 @@ contract("Solidified Bug Bounty", accounts => {
     const finalSeverity = new BN("1");
 
     beforeEach(async () => {
-      bugBounty = await BugBounty.new(dai.address);
+      bugBounty = await deployBugBounty(dai.address);
       await distributeDai(accounts, dai);
       await depositDai(accounts, dai, bugBounty);
 
@@ -531,7 +541,7 @@ contract("Solidified Bug Bounty", accounts => {
     const votingFee = new BN(ether("10"));
 
     beforeEach(async () => {
-      bugBounty = await BugBounty.new(dai.address);
+      bugBounty = await deployBugBounty(dai.address);
       await distributeDai(accounts, dai);
       await depositDai(accounts, dai, bugBounty);
 

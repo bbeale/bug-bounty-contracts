@@ -1,89 +1,11 @@
 pragma solidity 0.5.0;
 //pragma experimental ABIEncoderV2;
 
+import "./SolidifiedStorage.sol";
 
-import "../node_modules/openzeppelin-solidity/contracts/math/SafeMath.sol";
-import "../node_modules/openzeppelin-solidity/contracts/token/ERC20/IERC20.sol";
-
-contract SolidifiedBugBounty {
+contract SolidifiedBugBounty is SolidifiedStorage {
 
     using SafeMath for uint256;
-
-    enum Severity { Critical, Major, Medium, Minor, Note}
-    enum BugStatus { pending, accepted, rejected, negotiation, arbitration}
-    enum ProjectStatus {active, unfunded, closed}
-
-    struct Project {
-        address owner;
-        bytes32 infoHash;
-        ProjectStatus status;
-        mapping(uint256 => uint256) rewards; // Severity to reqerd value
-    }
-
-    struct Bug {
-        address hunter;
-        uint256 timestamp;
-        uint256 value;
-        BugStatus status;
-        Severity severity;
-        bytes32 projectId;
-    }
-
-    struct Proposal {
-        Severity severity;
-        uint256 timestamp;
-        bytes32 justification;
-        address proponent;
-    }
-
-    struct Arbitration {
-        address plaintiff;
-        address defendant;
-        uint256 timestamp;
-        uint256 commitPeriod;
-        bytes32 bugId;
-    }
-
-    struct Vote {
-       address owner;
-       uint8 vot;
-    }
-
-    uint256 constant public INTERIM = 3 days;
-    uint256 constant public ARBITRATION_FEE = 10 ether;
-    uint256 constant public VOTING_FEE = 10 ether;
-    uint256 constant public BUG_STAKE = 10;
-
-    address public dai;
-
-    mapping(address => uint256) public reputation;
-    mapping(address => uint256) public balances;
-    mapping(bytes32 => uint256) public objectBalances;
-
-    mapping(uint256 => bytes32) public projectNumberToId;
-    mapping(bytes32 => mapping(uint256 => bytes32)) public bugNumberToId;
-    mapping(bytes32 => mapping(uint256 => bytes32)) public arbitrationNumberToId;
-
-    mapping(bytes32 => Project) public projects;
-    mapping(bytes32 => Bug) public bugs;
-    mapping(bytes32 => Arbitration) public arbitrations;
-    mapping(bytes32 => mapping(uint256 => Proposal)) public proposals;
-
-    mapping(bytes32 => uint256) public bugCount;
-    mapping(bytes32 => uint256) public proposalCount;
-    uint256 internal projectCount;
-
-    mapping(bytes32 => mapping(address => bytes32)) public commits;
-    mapping(bytes32 => mapping(address => uint256)) public votes;
-    mapping(bytes32 => address[5]) public voters;
-
-    event ProjectPosted(bytes32 Id, address Owner);
-    event ProjectPulled(bytes32 Id, address Owner, uint256 time);
-    event BugPosted(bytes32 projectId, bytes32 bugId, address hunter);
-    event Deposit();
-    event Withdraw();
-    event BugAccepted();
-    event BugRejected();
 
     constructor(address _dai) public {
         dai = _dai;
@@ -97,14 +19,14 @@ contract SolidifiedBugBounty {
         require(IERC20(dai).transferFrom(msg.sender, address(this),_amount), "transferFrom Dai failed");
         balances[msg.sender] = balances[msg.sender].add(_amount);
         if(reputation[msg.sender] == 0) reputation[msg.sender] = 50;
-        emit Deposit();
+        emit Deposit(msg.sender, _amount);
     }
 
     function withdraw(uint256 _amount) public {
         require(balances[msg.sender] >= _amount, "Not enough funds");
         require(IERC20(dai).transfer(msg.sender,_amount), "External call Falied");
         balances[msg.sender] = balances[msg.sender].sub(_amount);
-        emit Withdraw();
+        emit Withdraw(msg.sender, _amount);
     }
 
     function __transfer(address _from, address _to, uint256 _amount) internal {
@@ -142,7 +64,7 @@ contract SolidifiedBugBounty {
         }
         projectNumberToId[projectNumber] = projectId;
         sendToObject(msg.sender, projectId, totalPool);
-        emit ProjectPosted(projectId, msg.sender);
+        emit ProjectPosted(projectId, projectNumber, msg.sender, ipfsHash, totalPool);
     }
 
     function pullProject(bytes32 projectId) public {
@@ -158,6 +80,7 @@ contract SolidifiedBugBounty {
         sendToObject(msg.sender, projectId, _amount);
         if (objectBalances[projectId] >= projects[projectId].rewards[0])
             projects[projectId].status = ProjectStatus.active;
+        emit PoolIncreased(projectId, msg.sender, objectBalances[projectId]);
     }
 
     /**
@@ -174,7 +97,7 @@ contract SolidifiedBugBounty {
         if(objectBalances[projectId] < projects[projectId].rewards[0]){
             projects[projectId].status = ProjectStatus.unfunded;
         }
-        emit BugPosted(projectId, bugId, msg.sender);
+        emit BugPosted(projectId, bugId, bugNumber,bugDescription, msg.sender, now);
     }
 
     function acceptBug(bytes32 projectId, bytes32 bugId) public {
@@ -194,6 +117,7 @@ contract SolidifiedBugBounty {
         bugs[bugId].status = BugStatus.negotiation;
         proposalCount[bugId]++;
         proposals[bugId][proposalCount[bugId]] = Proposal(severity, now, justification, msg.sender);
+        emit ProposalMade(projectId, bugId, proposalCount[bugId], msg.sender);
     }
 
     function acceptProposal(bytes32 projectId, bytes32 bugId) public {
@@ -214,7 +138,7 @@ contract SolidifiedBugBounty {
         bug.status = BugStatus.accepted;
         sendToAddress(_bugId,bug.hunter, bug.value.add(bug.value.div(BUG_STAKE)));
         bugs[_bugId] = bug;
-        emit BugAccepted();
+        emit BugAccepted(bug.projectId, _bugId, bug.hunter, msg.sender);
     }
 
     function _rejectBug(bytes32 _bugId) internal {
@@ -222,7 +146,7 @@ contract SolidifiedBugBounty {
         bug.status = BugStatus.rejected;
         __transfer(_bugId, bug.projectId, objectBalances[_bugId]);
         bugs[_bugId] = bug;
-        emit BugRejected();
+        emit BugRejected(bug.projectId, _bugId, bug.hunter, msg.sender);
     }
 
     function counterProposal(bytes32 projectId, bytes32 bugId, bytes32 justification, Severity severity) public {
@@ -230,6 +154,7 @@ contract SolidifiedBugBounty {
         require(msg.sender == proposer, "Not current proposer");
         proposalCount[bugId]++;
         proposals[bugId][proposalCount[bugId]] = Proposal(severity, now, justification, msg.sender);
+        emit ProposalMade(projectId, bugId, proposalCount[bugId], msg.sender);
     }
 
     /**
@@ -242,12 +167,15 @@ contract SolidifiedBugBounty {
         arbitrationId = keccak256(abi.encodePacked(projectId, bugId));
         sendToObject(msg.sender, arbitrationId, ARBITRATION_FEE);
         arbitrations[arbitrationId] = Arbitration(msg.sender,defendant,now,0, bugId);
+        emit ArbitrationRequested(projectId, bugId, arbitrationId, plaintiff, defendant, now);
     }
 
     function acceptArbitration(bytes32 arbitrationId) public {
         require(msg.sender == arbitrations[arbitrationId].defendant);
         sendToObject(msg.sender, arbitrationId, ARBITRATION_FEE);
         arbitrations[arbitrationId].commitPeriod = now;
+        Arbitration memory arb = arbitrations[arbitrationId];
+        emit ArbitrationAccepted(bugs[arb.bugId].projectId, arb.bugId, arbitrationId, arb.plaintiff, arb.defendant, now);
     }
 
     function rejectArbitration(bytes32 arbitrationId) public {
@@ -256,6 +184,7 @@ contract SolidifiedBugBounty {
         sendToAddress(arbitrationId, arb.plaintiff, ARBITRATION_FEE);
         __transfer(arbitrationId, arb.bugId, objectBalances[arbitrationId]);
         arb.plaintiff == bugs[arb.bugId].hunter ? _acceptBug(arb.bugId) : _rejectBug(arb.bugId);
+        emit ArbitrationRejected(bugs[arb.bugId].projectId, arb.bugId, arbitrationId, arb.plaintiff, arb.defendant, now);
     }
 
     function commitVote(bytes32 arbitrationId, bytes32 commit) public {
