@@ -1,4 +1,6 @@
 pragma solidity 0.5.0;
+//pragma experimental ABIEncoderV2;
+
 
 import "../node_modules/openzeppelin-solidity/contracts/math/SafeMath.sol";
 import "../node_modules/openzeppelin-solidity/contracts/token/ERC20/IERC20.sol";
@@ -72,7 +74,8 @@ contract SolidifiedBugBounty {
     uint256 internal projectCount;
 
     mapping(bytes32 => mapping(address => bytes32)) public commits;
-    mapping(bytes32 => Vote[5]) public votes;
+    mapping(bytes32 => mapping(address => uint256)) public votes;
+    mapping(bytes32 => address[5]) public voters;
 
     event ProjectPosted(bytes32 Id, address Owner);
     event ProjectPulled(bytes32 Id, address Owner, uint256 time);
@@ -93,6 +96,7 @@ contract SolidifiedBugBounty {
     function deposit(uint256 _amount) public {
         require(IERC20(dai).transferFrom(msg.sender, address(this),_amount), "transferFrom Dai failed");
         balances[msg.sender] = balances[msg.sender].add(_amount);
+        if(reputation[msg.sender] == 0) reputation[msg.sender] = 50;
         emit Deposit();
     }
 
@@ -248,7 +252,7 @@ contract SolidifiedBugBounty {
 
     function rejectArbitration(bytes32 arbitrationId) public {
         Arbitration memory arb = arbitrations[arbitrationId];
-        require(msg.sender == arb.defendant, "Invalid msg.sender");
+        require(msg.sender == arb.defendant || (now.sub(arb.timestamp) > INTERIM), "Invalid msg.sender or time");
         sendToAddress(arbitrationId, arb.plaintiff, ARBITRATION_FEE);
         __transfer(arbitrationId, arb.bugId, objectBalances[arbitrationId]);
         arb.plaintiff == bugs[arb.bugId].hunter ? _acceptBug(arb.bugId) : _rejectBug(arb.bugId);
@@ -263,20 +267,29 @@ contract SolidifiedBugBounty {
         commits[arbitrationId][msg.sender] = commit;
     }
 
-    // function revealVote(bytes32 arbitrationId, uint256 vote, bytes32 salt) public {
-    //     require(vote < 2);
-    //     Arbitration memory arb = arbitrations[arbitrationId];
-    //     require(now >= arb.commitPeriod.add(INTERIM));
-    //     bool validVote = keccak256(abi.encodePacked(vote, salt)) == commits[arbitrationId][msg.sender];
-    //     if(validVote && canVote(msg.sender, arbitrationId)) {
-    //         votes[arbitrationId] = insertVote(Vote(msg.sender, uint8(vote)),votes[arbitrationId]);
-    //     }
-    // }
-
-    function slashCommit(bytes32 arbitrationId, bytes32 salt, address voter) public {
-
+    function revealCommit(bytes32 arbitrationId, uint256 vote, bytes32 salt) public {
+        require(vote  == 1 || vote == 2); //Make this an ENUM
+        Arbitration memory arb = arbitrations[arbitrationId];
+        require(now >= arb.commitPeriod.add(INTERIM));
+        bool validVote = keccak256(abi.encodePacked(vote, salt)) == commits[arbitrationId][msg.sender];
+        if(validVote) votes[arbitrationId][msg.sender] = vote;
+        if(validVote && canVote(msg.sender, arbitrationId) && voters[arbitrationId][4] != address(0)){
+            //Refund voting stake of last voters
+            sendToAddress(arbitrationId, voters[arbitrationId][4], VOTING_FEE);
+        }
+        address[5] memory vot = insertVoteM(msg.sender, voters[arbitrationId]);
+        voters[arbitrationId] = vot;
     }
 
+    function slashCommit(bytes32 arbitrationId, uint256 vote, bytes32 salt, address voter) public {
+        require(now.sub(arbitrations[arbitrationId].commitPeriod) < INTERIM, "too late to slash");
+        bool validVote = keccak256(abi.encodePacked(vote, salt)) == commits[arbitrationId][voter];
+        if(validVote) {
+            //How to deal with double voting?
+            commits[arbitrationId][voter] = bytes32(0);
+            sendToAddress(arbitrationId, msg.sender, VOTING_FEE);
+        }
+    }
     /**
             Administrartive Functions
     **/
@@ -284,20 +297,34 @@ contract SolidifiedBugBounty {
     // function changeFee() public {}
     // function flagBugAsRepetivie() public {}
 
-    function insertVote(Vote memory vote, Vote[5] memory voteArray) internal returns(Vote[5] memory) {
-       voteArray[4] = vote;
-       for(uint i = 4; i > 0; i++){
-           if(reputation[voteArray[i].owner] < reputation[vote.owner]) break;
-           (voteArray[i-1], voteArray[i]) = (voteArray[i], voteArray[i-1]);
+
+    function insertVote(address voter, address[5] storage votersArray) internal {
+       for(uint i = 4; i > 0; i--){
+           if(reputation[votersArray[i - 1]] >= reputation[voter]) {
+            votersArray[i] = voter;
+            break;
+           }
+           votersArray[i] = votersArray[i - 1];
+           votersArray[i - 1] = voter;
        }
-       return voteArray;
+    }
+
+    function insertVoteM(address voter, address[5] memory votersArray) internal view returns(address[5] memory){
+       for(uint i = 4; i > 0; i--){
+           if(reputation[votersArray[i - 1]] >= reputation[voter]) {
+            votersArray[i] = voter;
+            break;
+           }
+           votersArray[i] = votersArray[i - 1];
+           votersArray[i - 1] = voter;
+       }
     }
 
     function canVote(address voter, bytes32 arbitrationId) public view returns(bool){
-        if(reputation[votes[arbitrationId][4].owner] < reputation[msg.sender]) return false;
+        if(reputation[voters[arbitrationId][4]] < reputation[voter]) return false;
         bool voted;
         for(uint256 i = 0; i < 5; i++) {
-            if(votes[arbitrationId][i].owner == msg.sender) voted = true;
+            if(voters[arbitrationId][i] == voter) voted = true;
         }
         return !voted;
     }

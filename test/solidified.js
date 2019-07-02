@@ -457,8 +457,30 @@ contract("Solidified Bug Bounty", accounts => {
     });
 
     //reject arbitration
+    it("Defendant party can reject arbitration", async () => {
+      const plaintiff = projectOwner;
+      const defendant = hunter;
+      await bugBounty.sendToArbitration(projectId, bugId, { from: plaintiff });
+      await bugBounty.rejectArbitration(arbitrationId, { from: defendant });
+
+      const arb = await bugBounty.getArbitrationDetails(arbitrationId);
+      let bug = await bugBounty.getBugDetails.call(bugId);
+      assert.isTrue(bug[2].eq(new BN("2")));
+      assert.equal(arb[0], plaintiff);
+      assert.equal(arb[1], defendant);
+    });
 
     //timeout reject
+    it("Anyone can reject arbitration if timeout has passed", async () => {
+      const plaintiff = projectOwner;
+      const defendant = hunter;
+      await bugBounty.sendToArbitration(projectId, bugId, { from: plaintiff });
+      await time.increase(time.duration.days("4"));
+      await bugBounty.rejectArbitration(arbitrationId);
+
+      let bug = await bugBounty.getBugDetails.call(bugId);
+      assert.isTrue(bug[2].eq(new BN("2")));
+    });
 
     //accept arbitration
     it("Defendant can accept arbitration", async () => {
@@ -471,17 +493,113 @@ contract("Solidified Bug Bounty", accounts => {
       assert.equal(arb[0], plaintiff);
       assert.equal(arb[1], defendant);
     });
+  }); //Context Arbitration
+
+  context("Arbitration Voting", async () => {
+    const totalPool = ether("5");
+    const ipfsHash = web3.utils.asciiToHex("Project Info");
+    const rewards = [
+      ether("3"),
+      ether("2"),
+      ether("1"),
+      ether("0.5"),
+      ether("0.1")
+    ];
+
+    const projectOwner = accounts[1];
+    const hunter = accounts[2];
+    const projectId = web3.utils.soliditySha3(
+      { t: "address", v: projectOwner },
+      { t: "uint256", v: 1 }
+    );
+    const bugId = web3.utils.soliditySha3(
+      { t: "bytes32", v: projectId },
+      { t: "uint256", v: 0 }
+    );
+    const arbitrationId = web3.utils.soliditySha3(
+      { t: "bytes32", v: projectId },
+      { t: "bytes32", v: bugId }
+    );
+    const bugInfo = web3.utils.asciiToHex("Bug Info");
+    const severity = new BN("2");
+    const newSeverity = new BN("2");
+    const justification = web3.utils.asciiToHex("Justification");
+    const counterJust = web3.utils.asciiToHex("Counter Justification");
+    const finalSeverity = new BN("1");
+    const plaintiff = projectOwner;
+    const defendant = hunter;
+    const votingFee = new BN(ether("10"));
+
+    beforeEach(async () => {
+      bugBounty = await BugBounty.new(dai.address);
+      await distributeDai(accounts, dai);
+      await depositDai(accounts, dai, bugBounty);
+
+      await bugBounty.postProject(ipfsHash, totalPool, rewards, {
+        from: projectOwner
+      });
+      await bugBounty.postBug(bugInfo, projectId, severity, { from: hunter });
+
+      await bugBounty.rejectBug(projectId, bugId, justification, newSeverity, {
+        from: projectOwner
+      });
+
+      await bugBounty.counterProposal(
+        projectId,
+        bugId,
+        counterJust,
+        finalSeverity,
+        { from: hunter }
+      );
+
+      await bugBounty.sendToArbitration(projectId, bugId, { from: plaintiff });
+      await bugBounty.acceptArbitration(arbitrationId, { from: defendant });
+    });
 
     //vote on arbitration
     it("Third party can vote on arbitration", async () => {
-      const plaintiff = projectOwner;
-      const defendant = hunter;
       const voter = accounts[5];
-      await bugBounty.sendToArbitration(projectId, bugId, { from: plaintiff });
-      await bugBounty.acceptArbitration(arbitrationId, { from: defendant });
 
-      const vote = web3.utils.soliditySha3("1", "666");
+      const vote = web3.utils.soliditySha3(
+        { t: "uint256", v: "1" },
+        { t: "bytes32", v: "666" }
+      );
       await bugBounty.commitVote(arbitrationId, vote, { from: voter });
     });
-  }); //Context Arbitration
+
+    it("Anyone can slash a commit if reveald porematurely", async () => {
+      const voter = accounts[5];
+      const salt = web3.utils.asciiToHex("666");
+      const vote = web3.utils.soliditySha3(
+        { t: "uint256", v: "1" },
+        { t: "bytes32", v: salt }
+      );
+      const slasher = accounts[8];
+      let beforeBal = await bugBounty.balances.call(slasher);
+      await bugBounty.commitVote(arbitrationId, vote, { from: voter });
+      await bugBounty.slashCommit(arbitrationId, "1", salt, voter, {
+        from: slasher
+      });
+      let afterBal = await bugBounty.balances.call(slasher);
+      assert.isTrue(beforeBal.eq(afterBal.sub(votingFee)));
+    });
+
+    it("Voter can reveal at correct time", async () => {
+      const voter = accounts[5];
+
+      const salt = web3.utils.asciiToHex("666");
+      const vote = web3.utils.soliditySha3(
+        { t: "uint256", v: "1" },
+        { t: "bytes32", v: salt }
+      );
+      let rep = await bugBounty.reputation.call(voter);
+      await bugBounty.commitVote(arbitrationId, vote, { from: voter });
+      await time.increase(time.duration.days("4"));
+      await bugBounty.revealCommit(arbitrationId, "1", salt, {
+        from: voter
+      });
+      let vot = await bugBounty.votes.call(arbitrationId, voter);
+      assert.isTrue(vot.eq(new BN("1")));
+    });
+  }); //Context Voting
 });
