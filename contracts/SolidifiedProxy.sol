@@ -18,16 +18,17 @@ contract SolidifiedProxy is SolidifiedStorage, Ownable {
   constructor(address _impl) public {
     implementation = _impl;
   }
- 
+
   function startUpgrade(address _newImpl) public onlyOwner {
       require(_newImpl != address(0));
       newImpl = _newImpl;
-      upgradeTime = now + INTERIM;
+      upgradeTime = now + 3 days;
       emit UpgradeStarted(implementation, newImpl, msg.sender, upgradeTime);
   }
 
   function finalizeUpgrade() public {
       require(now >= upgradeTime);
+      require(newImpl != address(0));
       implementation = newImpl;
       newImpl = address(0);
       upgradeTime = 0;

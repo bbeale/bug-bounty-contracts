@@ -1,5 +1,4 @@
 pragma solidity 0.5.0;
-//pragma experimental ABIEncoderV2;
 
 
 import "../node_modules/openzeppelin-solidity/contracts/math/SafeMath.sol";
@@ -14,58 +13,36 @@ contract SolidifiedStorage {
 
     struct Project {
         address owner;
-        bytes32 infoHash;
         ProjectStatus status;
-        mapping(uint256 => uint256) rewards; // Severity to reqerd value
+        mapping(uint256 => uint256) rewards;
     }
 
     struct Bug {
         address hunter;
-        uint256 timestamp;
-        uint256 value;
         BugStatus status;
         Severity severity;
+        uint32 timestamp;
         bytes32 projectId;
     }
 
     struct Proposal {
         Severity severity;
-        uint256 timestamp;
-        bytes32 justification;
-        address proponent;
+        uint32 timestamp;
     }
 
     struct Arbitration {
         address plaintiff;
         address defendant;
-        uint16 plaintiffProposal;
-        uint16 defendantProposal;
-        uint256 votersCount;
-        uint256 timestamp;
-        uint256 commitPeriod;
+        uint32 votersCount;
+        uint32 commitPeriod;
         bytes32 bugId;
     }
-
-    struct Vote {
-       address owner;
-       uint8 vot;
-    }
-
-    uint256 constant public INTERIM = 3 days;
-    uint256 constant public ARBITRATION_FEE = 10 ether;
-    uint256 constant public VOTING_FEE = 10 ether;
-    uint256 constant public BUG_STAKE = 10;
-    uint256 constant public MINIMUN_QUORUM = 5;
 
     address public dai;
 
     mapping(address => uint256) public reputation;
     mapping(address => uint256) public balances;
     mapping(bytes32 => uint256) public objectBalances;
-
-    mapping(uint256 => bytes32) public projectNumberToId;
-    mapping(bytes32 => mapping(uint256 => bytes32)) public bugNumberToId;
-    mapping(bytes32 => mapping(uint256 => bytes32)) public arbitrationNumberToId;
 
     mapping(bytes32 => Project) public projects;
     mapping(bytes32 => Bug) public bugs;
@@ -77,7 +54,7 @@ contract SolidifiedStorage {
     uint256 internal projectCount;
 
     mapping(bytes32 => mapping(address => bytes32)) public commits;
-    mapping(bytes32 => mapping(address => uint256)) public votes;
+    mapping(bytes32 => mapping(address => Ruling)) public votes;
     mapping(bytes32 => address[5]) public voters;
 
     event Deposit(address holder, uint256 amount);
@@ -88,7 +65,7 @@ contract SolidifiedStorage {
     event BugPosted(bytes32 projectId, bytes32 bugId, uint256 bugNumber, bytes32 bugInfo, address hunter, uint256 time);
     event BugAccepted(bytes32 projectId, bytes32 bugId, address hunter, address indexed sender);
     event BugRejected(bytes32 projectId, bytes32 bugId, address hunter, address indexed sender);
-    event ProposalMade(bytes32 projectId, bytes32 bugId, uint256 proposalNumber, address proposer);
+    event ProposalMade(bytes32 projectId, bytes32 bugId, bytes32 justification, uint256 proposalNumber, address proposer);
     event ArbitrationRequested(bytes32 projectId, bytes32 bugId, bytes32 arbitrationId, address indexed  plaintiff, address indexed defendant, uint256 time);
     event ArbitrationAccepted(bytes32 projectId, bytes32 bugId, bytes32 arbitrationId, address  indexed plaintiff, address  indexed defendant, uint256 time);
     event ArbitrationRejected(bytes32 projectId, bytes32 bugId, bytes32 arbitrationId, address  indexed plaintiff, address  indexed defendant, uint256 time);
