@@ -125,6 +125,7 @@ contract SolidifiedBugBounty is SolidifiedStorage {
 
     function rejectBug(bytes32 projectId, bytes32 bugId, bytes32 justification, Severity severity) public {
         require(msg.sender == projects[projectId].owner);
+        require(uint256(bugs[bugId].severity) <= uint256(severity));
         bugs[bugId].status = BugStatus.negotiation;
         proposalCount[bugId]++;
         proposals[bugId][proposalCount[bugId]] = Proposal(severity, uint32(now));
@@ -165,6 +166,7 @@ contract SolidifiedBugBounty is SolidifiedStorage {
     function counterProposal(bytes32 projectId, bytes32 bugId, bytes32 justification, Severity severity) public {
        (address proposer,) = inTurn(projectId, bugId);
         require(msg.sender == proposer);
+        require(uint256(bugs[bugId].severity) <= uint256(severity));
         proposalCount[bugId]++;
         proposals[bugId][proposalCount[bugId]] = Proposal(severity, uint32(now));
         emit ProposalMade(projectId, bugId, justification, proposalCount[bugId], msg.sender);
@@ -180,7 +182,8 @@ contract SolidifiedBugBounty is SolidifiedStorage {
         require(msg.sender == plaintiff);
         arbitrationId = keccak256(abi.encodePacked(projectId, bugId));
         sendToObject(msg.sender, arbitrationId, ARBITRATION_FEE);
-        arbitrations[arbitrationId] = Arbitration(msg.sender,defendant,0,uint32(0), bugId);
+        __transfer(bugId, arbitrationId, objectBalances[bugId]);
+        arbitrations[arbitrationId] = Arbitration(msg.sender,defendant,0,uint32(0),uint32(now),bugId);
         emit ArbitrationRequested(projectId, bugId, arbitrationId, plaintiff, defendant, now);
     }
 
@@ -194,7 +197,7 @@ contract SolidifiedBugBounty is SolidifiedStorage {
 
     function rejectArbitration(bytes32 arbitrationId) public {
         Arbitration memory arb = arbitrations[arbitrationId];
-        require(msg.sender == arb.defendant || arb.commitPeriod < now);
+       require(msg.sender == arb.defendant || arb.requestTime.add(INTERIM) < now);
         sendToAddress(arbitrationId, arb.plaintiff, ARBITRATION_FEE);
         __transfer(arbitrationId, arb.bugId, objectBalances[arbitrationId]);
         //get last proposal and update bug
@@ -222,12 +225,11 @@ contract SolidifiedBugBounty is SolidifiedStorage {
         if(validVote){
            votes[arbitrationId][msg.sender] = vote;
            commits[arbitrationId][msg.sender] = bytes32(0);
-           if(canVote(msg.sender, arbitrationId)) {
-               sendToAddress(arbitrationId, voters[arbitrationId][4], VOTING_FEE);
+           if(reputation[voters[arbitrationId][4]] < reputation[msg.sender]) {
+               if(voters[arbitrationId][4] != address(0)){
+                   sendToAddress(arbitrationId, voters[arbitrationId][4], VOTING_FEE);
+               }
                address[5] memory vot = insertVote(msg.sender, voters[arbitrationId]);
-            //for(uint i = 0; i < 5; i++){
-              //  voters[arbitrationId][i] = vot[i];
-            //}
                voters[arbitrationId] = vot;
            } else {
                sendToAddress(arbitrationId, msg.sender, VOTING_FEE);
@@ -258,13 +260,7 @@ contract SolidifiedBugBounty is SolidifiedStorage {
        return votersArray;
     }
 
-    function canVote(address voter, bytes32 arbitrationId) public view returns(bool){
-        return reputation[voters[arbitrationId][4]] < reputation[voter] && voters[arbitrationId][4] == address(0);
-    }
 
-
-
-    event DEBUG(uint v);
     function tallyVotes(bytes32 arbitrationId) public view returns(uint256 plaintiffVotes, uint256 defendantVotes, Ruling winner){
         address[5] memory voters = voters[arbitrationId];
         for(uint i = 0; i < voters.length; i++){
@@ -276,13 +272,13 @@ contract SolidifiedBugBounty is SolidifiedStorage {
 
     function updateVotersStakes(bytes32 arbitrationId) internal returns(address[] memory) {
         address[5] memory allVoters = voters[arbitrationId];
-        uint256 totalPool = VOTING_FEE.add(ARBITRATION_FEE);
+        uint256 totalPool = VOTING_FEE.mul(5).add(ARBITRATION_FEE);
         (uint256 plaintiffVotes, uint256 defendantVotes, Ruling ruling) = tallyVotes(arbitrationId);
         uint256 winnigVotes = ruling == Ruling.plaintiff ? plaintiffVotes : defendantVotes;
         for(uint i = 0; i < allVoters.length; i++){
             if(votes[arbitrationId][allVoters[i]] == ruling) {
                 //Voter voted according to the jury
-               sendToAddress(arbitrationId, allVoters[i], totalPool.div(winnigVotes)); //Possible to have rounding errors
+               sendToAddress(arbitrationId, allVoters[i], totalPool.div(winnigVotes).sub(1)); //Possible to have rounding errors
                reputation[msg.sender] = reputation[msg.sender].add(200);
             } else {
                 reputation[msg.sender] = reputation[msg.sender] > 200 ? reputation[msg.sender] - 200 : 0;
@@ -301,6 +297,7 @@ contract SolidifiedBugBounty is SolidifiedStorage {
         updateVotersStakes(arbitrationId);
         address winnerAddress = winner == Ruling.plaintiff ? arb.plaintiff : arb.defendant;
         sendToAddress(arbitrationId, winnerAddress, ARBITRATION_FEE);
+        __transfer(arbitrationId, arb.bugId, objectBalances[arbitrationId]);
         _resolveBug(arb.bugId);
     }
 

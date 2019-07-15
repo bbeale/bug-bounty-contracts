@@ -35,6 +35,7 @@ contract SolidifiedStorage {
         address defendant;
         uint32 votersCount;
         uint32 commitPeriod;
+        uint32 requestTime;
         bytes32 bugId;
     }
 
