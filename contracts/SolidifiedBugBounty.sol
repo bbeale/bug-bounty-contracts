@@ -7,17 +7,12 @@ contract SolidifiedBugBounty is SolidifiedStorage {
 
     using SafeMath for uint256;
     using SafeMath for uint32;
-
-
-    uint256 constant public INTERIM = 3 days;
-    uint256 constant public ARBITRATION_FEE = 10 ether;
-    uint256 constant public VOTING_FEE = 10 ether;
-    uint256 constant public BUG_STAKE = 10;
-    uint256 constant public MINIMUN_QUORUM = 5;
-
-    constructor(address _dai) public {
+    
+    function initialize(address _dai) public {
+        require(!initialized);
         dai = _dai;
         projectCount++;
+        initialized = true;
     }
 
     function giveReputationTEST(address[] memory add, uint256[] memory amounts) public {

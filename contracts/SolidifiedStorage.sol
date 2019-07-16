@@ -39,8 +39,6 @@ contract SolidifiedStorage {
         bytes32 bugId;
     }
 
-    address public dai;
-
     mapping(address => uint256) public reputation;
     mapping(address => uint256) public balances;
     mapping(bytes32 => uint256) public objectBalances;
@@ -57,6 +55,15 @@ contract SolidifiedStorage {
     mapping(bytes32 => mapping(address => bytes32)) public commits;
     mapping(bytes32 => mapping(address => Ruling)) public votes;
     mapping(bytes32 => address[5]) public voters;
+
+    address public dai;
+    bool initialized;
+    uint256 constant public INTERIM = 3 days;
+    uint256 constant public ARBITRATION_FEE = 10 ether;
+    uint256 constant public VOTING_FEE = 10 ether;
+    uint256 constant public BUG_STAKE = 10;
+    uint256 constant public MINIMUN_QUORUM = 5;
+
 
     event Deposit(address holder, uint256 amount);
     event Withdraw(address holder, uint256 amount);

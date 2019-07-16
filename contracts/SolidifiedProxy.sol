@@ -11,28 +11,37 @@ contract SolidifiedProxy is SolidifiedStorage, Ownable {
    address public implementation;
    address public newImpl;
    uint256 public upgradeTime;
+   bytes initData;
 
    event UpgradeStarted(address currentImplementation, address proposedImplementation, address starter, uint256 upgradeTime);
    event UpgradeFinalized(address newImplementation, address sender, uint256 upgradeTime);
 
-  constructor(address _impl) public {
+  constructor(address _impl, bytes memory _initData) public {
     implementation = _impl;
+    //implementation.delegatecall(initData);
+    (bool suc, ) = implementation.delegatecall(_initData);
+    if(!suc) revert();
   }
 
-  function startUpgrade(address _newImpl) public onlyOwner {
+  function startUpgrade(address _newImpl, bytes memory _initData) public onlyOwner {
       require(_newImpl != address(0));
       newImpl = _newImpl;
       upgradeTime = now + 3 days;
+      initData = _initData;
       emit UpgradeStarted(implementation, newImpl, msg.sender, upgradeTime);
   }
 
   function finalizeUpgrade() public {
       require(now >= upgradeTime);
       require(newImpl != address(0));
+      initialized = false;
       implementation = newImpl;
+      (bool suc, ) = implementation.delegatecall(initData);
+      if(!suc) revert();
       newImpl = address(0);
       upgradeTime = 0;
-      emit UpgradeFinalized(newImpl, msg.sender, now);
+      delete initData;
+      emit UpgradeFinalized(implementation, msg.sender, now);
   }
 
   /**

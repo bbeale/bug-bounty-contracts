@@ -1,4 +1,5 @@
 const BugBounty = artifacts.require("SolidifiedBugBounty");
+const SolidifiedUpgrade = artifacts.require("SolidifiedUpgrade");
 const SolidifiedProxy = artifacts.require("SolidifiedProxy");
 const Dai = artifacts.require("MockDai");
 const {
@@ -9,6 +10,11 @@ const {
   ether,
   expectRevert
 } = require("openzeppelin-test-helpers");
+
+const encodeInit = address => {
+  let base = "0xc4d66de8000000000000000000000000";
+  return base + address.slice(2);
+};
 
 const distributeDai = async (addresses, daiContract) => {
   addresses.forEach(async add => {
@@ -29,9 +35,11 @@ const depositDai = async (addresses, daiContract, bugBountyContract) => {
 };
 
 const deployBugBounty = async daiAddress => {
-  let implementation = await BugBounty.new(daiAddress);
-  let proxy = await new SolidifiedProxy(implementation.address);
-  let bugBounty = await BugBounty.at(proxy.address);
+  let implementation = await BugBounty.new();
+  let data = encodeInit(daiAddress);
+  let proxy = await SolidifiedProxy.new(implementation.address, data);
+  bugBounty = await BugBounty.at(proxy.address);
+
   return bugBounty;
 };
 
@@ -79,13 +87,64 @@ contract("Solidified Bug Bounty", accounts => {
   });
 
   context("Deployment", async () => {
+    const owner = accounts[1];
+
     it("Deploys Correctly", async () => {
-      let implementation = await BugBounty.new(dai.address);
-      let proxy = await new SolidifiedProxy(implementation.address);
+      let implementation = await BugBounty.new();
+      let data = encodeInit(dai.address);
+      let proxy = await SolidifiedProxy.new(implementation.address, data);
       bugBounty = await BugBounty.at(proxy.address);
       let daiAddress = await bugBounty.dai.call();
       assert.equal(daiAddress, dai.address, "Should have correct Dai address");
-      assert.isTrue(true);
+    });
+
+    it("Upgrades proxy correctly", async () => {
+      let implementation = await BugBounty.new();
+      let data = encodeInit(dai.address);
+      let proxy = await SolidifiedProxy.new(implementation.address, data, {
+        from: owner
+      });
+      let upgradeImpl = await SolidifiedUpgrade.new();
+
+      await proxy.startUpgrade(upgradeImpl.address, data, { from: owner });
+      await time.increase(time.duration.days(4));
+      await proxy.finalizeUpgrade();
+
+      let impl = await proxy.implementation.call();
+      let newImpl = await proxy.newImpl.call();
+      let upgradetime = await proxy.upgradeTime.call();
+
+      let up = await SolidifiedUpgrade.at(proxy.address);
+      let daiAddress = await up.dai.call();
+
+      assert.equal(impl, upgradeImpl.address);
+      assert.equal(newImpl, constants.ZERO_ADDRESS);
+      assert.equal(daiAddress, dai.address);
+      assert.isTrue(upgradetime.isZero());
+    });
+
+    it("Upgrades fails if called before upgradetime", async () => {
+      let implementation = await BugBounty.new();
+      let data = encodeInit(dai.address);
+      let proxy = await SolidifiedProxy.new(implementation.address, data, {
+        from: owner
+      });
+      let upgradeImpl = await SolidifiedUpgrade.new();
+
+      await proxy.startUpgrade(upgradeImpl.address, data, { from: owner });
+      await expectRevert.unspecified(proxy.finalizeUpgrade());
+    });
+
+    it("Upgrades fails if not called by owner", async () => {
+      let implementation = await BugBounty.new();
+      let data = encodeInit(dai.address);
+      let proxy = await SolidifiedProxy.new(implementation.address, data, {
+        from: owner
+      });
+      let upgradeImpl = await SolidifiedUpgrade.new();
+      await expectRevert.unspecified(
+        proxy.startUpgrade(upgradeImpl.address, data, { from: accounts[9] })
+      );
     });
   });
 
