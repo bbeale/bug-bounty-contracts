@@ -28,6 +28,7 @@
   "devDependencies": {
     "chai": "^4.2.0",
     "coveralls": "^3.0.3",
+    "eth-gas-reporter": "^0.2.1",
     "openzeppelin-test-helpers": "^0.4.0",
     "solidity-coverage": "^0.5.11"
   }

@@ -1,4 +1,6 @@
 const BugBounty = artifacts.require("SolidifiedBugBounty");
+const SolidifiedUpgrade = artifacts.require("SolidifiedUpgrade");
+const SolidifiedProxy = artifacts.require("SolidifiedProxy");
 const Dai = artifacts.require("MockDai");
 const {
   BN,
@@ -8,6 +10,11 @@ const {
   ether,
   expectRevert
 } = require("openzeppelin-test-helpers");
+
+const encodeInit = address => {
+  let base = "0xc4d66de8000000000000000000000000";
+  return base + address.slice(2);
+};
 
 const distributeDai = async (addresses, daiContract) => {
   addresses.forEach(async add => {
@@ -27,6 +34,50 @@ const depositDai = async (addresses, daiContract, bugBountyContract) => {
   }
 };
 
+const deployBugBounty = async daiAddress => {
+  let implementation = await BugBounty.new();
+  let data = encodeInit(daiAddress);
+  let proxy = await SolidifiedProxy.new(implementation.address, data);
+  bugBounty = await BugBounty.at(proxy.address);
+
+  return bugBounty;
+};
+
+const generateVotes = amount => {
+  votes = [];
+  for (var i = 0; i < amount; i++) {
+    const str = "salt" + i + "salt2";
+    const salt = web3.utils.asciiToHex(str);
+    const ruling = Math.floor(Math.random() * 2 + 1);
+    const commit = web3.utils.soliditySha3(
+      { t: "uint256", v: ruling },
+      { t: "bytes32", v: salt }
+    );
+    votes.push({ commit: commit, ruling: ruling, salt: salt });
+  }
+  return votes;
+};
+
+const tallyVotes = votesArr => {
+  let plaintiffVotes = 0;
+  let defendantVotes = 0;
+  let winner = 0;
+  for (var i = 0; i < votesArr.length; i++) {
+    if (votes[i].ruling == 1) {
+      plaintiffVotes++;
+    }
+    if (votes[i].ruling == 2) {
+      defendantVotes++;
+    }
+  }
+  if (plaintiffVotes > defendantVotes) {
+    winner = 1;
+  } else {
+    winner = 2;
+  }
+  return [plaintiffVotes, defendantVotes, winner];
+};
+
 contract("Solidified Bug Bounty", accounts => {
   let dai,
     bugBounty = {};
@@ -36,16 +87,70 @@ contract("Solidified Bug Bounty", accounts => {
   });
 
   context("Deployment", async () => {
+    const owner = accounts[1];
+
     it("Deploys Correctly", async () => {
-      bugBounty = await BugBounty.new(dai.address);
+      let implementation = await BugBounty.new();
+      let data = encodeInit(dai.address);
+      let proxy = await SolidifiedProxy.new(implementation.address, data);
+      bugBounty = await BugBounty.at(proxy.address);
       let daiAddress = await bugBounty.dai.call();
       assert.equal(daiAddress, dai.address, "Should have correct Dai address");
+    });
+
+    it("Upgrades proxy correctly", async () => {
+      let implementation = await BugBounty.new();
+      let data = encodeInit(dai.address);
+      let proxy = await SolidifiedProxy.new(implementation.address, data, {
+        from: owner
+      });
+      let upgradeImpl = await SolidifiedUpgrade.new();
+
+      await proxy.startUpgrade(upgradeImpl.address, data, { from: owner });
+      await time.increase(time.duration.days(4));
+      await proxy.finalizeUpgrade();
+
+      let impl = await proxy.implementation.call();
+      let newImpl = await proxy.newImpl.call();
+      let upgradetime = await proxy.upgradeTime.call();
+
+      let up = await SolidifiedUpgrade.at(proxy.address);
+      let daiAddress = await up.dai.call();
+
+      assert.equal(impl, upgradeImpl.address);
+      assert.equal(newImpl, constants.ZERO_ADDRESS);
+      assert.equal(daiAddress, dai.address);
+      assert.isTrue(upgradetime.isZero());
+    });
+
+    it("Upgrades fails if called before upgradetime", async () => {
+      let implementation = await BugBounty.new();
+      let data = encodeInit(dai.address);
+      let proxy = await SolidifiedProxy.new(implementation.address, data, {
+        from: owner
+      });
+      let upgradeImpl = await SolidifiedUpgrade.new();
+
+      await proxy.startUpgrade(upgradeImpl.address, data, { from: owner });
+      await expectRevert.unspecified(proxy.finalizeUpgrade());
+    });
+
+    it("Upgrades fails if not called by owner", async () => {
+      let implementation = await BugBounty.new();
+      let data = encodeInit(dai.address);
+      let proxy = await SolidifiedProxy.new(implementation.address, data, {
+        from: owner
+      });
+      let upgradeImpl = await SolidifiedUpgrade.new();
+      await expectRevert.unspecified(
+        proxy.startUpgrade(upgradeImpl.address, data, { from: accounts[9] })
+      );
     });
   });
 
   context("Depositing and Withdrawing tokens", async () => {
     beforeEach(async () => {
-      bugBounty = await BugBounty.new(dai.address);
+      bugBounty = await deployBugBounty(dai.address);
       await distributeDai(accounts, dai);
     });
 
@@ -84,7 +189,7 @@ contract("Solidified Bug Bounty", accounts => {
 
   context("Posting and Managing Projects", async () => {
     beforeEach(async () => {
-      bugBounty = await BugBounty.new(dai.address);
+      bugBounty = await deployBugBounty(dai.address);
       await distributeDai(accounts, dai);
       await depositDai(accounts, dai, bugBounty);
     });
@@ -109,11 +214,10 @@ contract("Solidified Bug Bounty", accounts => {
       });
       let project = await bugBounty.getProjectDetails.call(projectId);
       assert.equal(project[0], accounts[3]);
-      assert.isTrue(project[2].isZero());
+      assert.isTrue(project[1].isZero());
       for (var i = 0; i < rewards.length; i++) {
-        assert.isTrue(project[3][i].eq(rewards[i]));
+        assert.isTrue(project[2][i].eq(rewards[i]));
       }
-      assert.isTrue(project[4].eq(totalPool));
     });
 
     it("Revert projects with unordered arrays", async () => {
@@ -126,11 +230,10 @@ contract("Solidified Bug Bounty", accounts => {
         ether("1"),
         ether("0.5")
       ];
-      await expectRevert(
+      await expectRevert.unspecified(
         bugBounty.postProject(ipfsHash, totalPool, rewards, {
           from: accounts[3]
-        }),
-        "Rewards must be ordered"
+        })
       );
     });
 
@@ -144,11 +247,10 @@ contract("Solidified Bug Bounty", accounts => {
         ether("1"),
         ether("0.5")
       ];
-      await expectRevert(
+      await expectRevert.unspecified(
         bugBounty.postProject(ipfsHash, totalPool, rewards, {
           from: accounts[3]
-        }),
-        "totalPool should be greater than critical reward"
+        })
       );
     });
 
@@ -177,7 +279,7 @@ contract("Solidified Bug Bounty", accounts => {
 
       let project = await bugBounty.getProjectDetails.call(projectId);
       assert.equal(project[0], accounts[4]);
-      assert.isTrue(project[2].eq(new BN("2")));
+      assert.isTrue(project[1].eq(new BN("2")));
     });
 
     it("It fails when non-owner pulls contract", async () => {
@@ -198,11 +300,10 @@ contract("Solidified Bug Bounty", accounts => {
         from: accounts[4]
       });
 
-      await expectRevert(
+      await expectRevert.unspecified(
         bugBounty.pullProject(projectId, {
           from: accounts[1]
-        }),
-        "Not authorized"
+        })
       );
     });
 
@@ -225,12 +326,12 @@ contract("Solidified Bug Bounty", accounts => {
       });
 
       let project = await bugBounty.getProjectDetails.call(projectId);
-      const initialPool = project[4];
+      const initialPool = await bugBounty.objectBalances.call(projectId);
       await bugBounty.increasePool(projectId, totalPool, {
         from: accounts[4]
       });
       project = await bugBounty.getProjectDetails.call(projectId);
-      const finalPool = project[4];
+      const finalPool = await bugBounty.objectBalances.call(projectId);
       assert.isTrue(initialPool.add(totalPool).eq(finalPool));
     });
   }); //Context Posting and managing Projects
@@ -255,7 +356,7 @@ contract("Solidified Bug Bounty", accounts => {
       { t: "uint256", v: 0 }
     );
     beforeEach(async () => {
-      bugBounty = await BugBounty.new(dai.address);
+      bugBounty = await deployBugBounty(dai.address);
       await distributeDai(accounts, dai);
       await depositDai(accounts, dai, bugBounty);
 
@@ -275,8 +376,8 @@ contract("Solidified Bug Bounty", accounts => {
       let finalBalance = await bugBounty.balances.call(hunter);
       let bug = await bugBounty.getBugDetails.call(bugId);
       assert.equal(bug[0], hunter);
-      assert.isTrue(bug[2].isZero());
-      assert.isTrue(bug[3].eq(bugValue));
+      assert.isTrue(bug[1].isZero());
+      assert.isTrue(bug[2].eq(severity));
       assert.isTrue(
         previousBalance.eq(finalBalance.add(bugValue.div(new BN("10"))))
       );
@@ -287,7 +388,7 @@ contract("Solidified Bug Bounty", accounts => {
       const severity = new BN("0");
       const bugValue = rewards[severity.toNumber()];
       const hunter = accounts[5];
-
+      const initialPool = await bugBounty.objectBalances.call(projectId);
       let previousBalance = await bugBounty.balances.call(hunter);
       await bugBounty.postBug(bugInfo, projectId, severity, { from: hunter });
       await bugBounty.acceptBug(projectId, bugId, { from: projectOwner });
@@ -295,11 +396,12 @@ contract("Solidified Bug Bounty", accounts => {
       let finalBalance = await bugBounty.balances.call(hunter);
       let bug = await bugBounty.getBugDetails.call(bugId);
       let project = await bugBounty.getProjectDetails(projectId);
+      const finalPool = await bugBounty.objectBalances.call(projectId);
       assert.equal(bug[0], hunter);
-      assert.isTrue(bug[2].eq(new BN("1")));
+      assert.isTrue(bug[1].eq(new BN("1")));
       assert.isTrue(previousBalance.eq(finalBalance.sub(bugValue)));
-      assert.isTrue(project[2].eq(new BN("1")));
-      assert.isTrue(project[4].eq(totalPool.sub(bugValue)));
+      assert.isTrue(project[1].eq(new BN("1")));
+      assert.isTrue(initialPool.eq(finalPool.add(bugValue)));
     });
 
     it("Bug can accept if timeout has passed", async () => {
@@ -309,18 +411,23 @@ contract("Solidified Bug Bounty", accounts => {
       const hunter = accounts[5];
 
       let previousBalance = await bugBounty.balances.call(hunter);
+      const initialPool = await bugBounty.objectBalances.call(projectId);
+
       await bugBounty.postBug(bugInfo, projectId, severity, { from: hunter });
       await time.increase(time.duration.days(4));
-      await bugBounty.timeoutAcceptBug(projectId, bugId);
+      await bugBounty.acceptBug(projectId, bugId);
 
       let finalBalance = await bugBounty.balances.call(hunter);
+      const finalPool = await bugBounty.objectBalances.call(projectId);
+
       let bug = await bugBounty.getBugDetails.call(bugId);
       let project = await bugBounty.getProjectDetails(projectId);
       assert.equal(bug[0], hunter);
-      assert.isTrue(bug[2].eq(new BN("1")));
+      assert.isTrue(bug[1].eq(new BN("1")));
       assert.isTrue(previousBalance.eq(finalBalance.sub(bugValue)));
-      assert.isTrue(project[2].eq(new BN("1")));
-      assert.isTrue(project[4].eq(totalPool.sub(bugValue)));
+
+      assert.isTrue(project[1].eq(new BN("1")));
+      assert.isTrue(initialPool.eq(finalPool.add(bugValue)));
     });
 
     it("Owner can make counter proposal", async () => {
@@ -337,8 +444,7 @@ contract("Solidified Bug Bounty", accounts => {
 
       let proposal = await bugBounty.getLatestProposal.call(bugId);
       let bug = await bugBounty.getBugDetails.call(bugId);
-      assert.equal(proposal[0], projectOwner);
-      assert.isTrue(bug[2].eq(new BN("3")));
+      assert.isTrue(bug[1].eq(new BN("3")));
     });
 
     it("Hunter can accept owner proposal", async () => {
@@ -357,11 +463,10 @@ contract("Solidified Bug Bounty", accounts => {
       let finalBalance = await bugBounty.balances.call(hunter);
       let proposal = await bugBounty.getLatestProposal.call(bugId);
       let bug = await bugBounty.getBugDetails.call(bugId);
-      let project = await bugBounty.getProjectDetails(projectId);
-      assert.equal(proposal[0], projectOwner);
-      assert.isTrue(bug[2].eq(new BN("1")));
+      let project = await bugBounty.getProjectDetails.call(projectId);
+      assert.isTrue(bug[1].eq(new BN("1")));
       assert.isTrue(previousBalance.eq(finalBalance.sub(bugValue)));
-      assert.isTrue(project[4].eq(totalPool.sub(bugValue)));
+      assert.isTrue(project[3].eq(totalPool.sub(bugValue)));
     });
 
     it("Hunter can make counter proposal", async () => {
@@ -385,8 +490,7 @@ contract("Solidified Bug Bounty", accounts => {
       );
       let proposal = await bugBounty.getLatestProposal.call(bugId);
       let bug = await bugBounty.getBugDetails.call(bugId);
-      assert.equal(proposal[0], hunter);
-      assert.isTrue(bug[2].eq(new BN("3")));
+      assert.isTrue(bug[1].eq(new BN("3")));
     });
   }); //Context Posting Bugs
 
@@ -416,14 +520,14 @@ contract("Solidified Bug Bounty", accounts => {
       { t: "bytes32", v: bugId }
     );
     const bugInfo = web3.utils.asciiToHex("Bug Info");
-    const severity = new BN("2");
+    const severity = new BN("1");
     const newSeverity = new BN("2");
     const justification = web3.utils.asciiToHex("Justification");
     const counterJust = web3.utils.asciiToHex("Counter Justification");
-    const finalSeverity = new BN("1");
+    const finalSeverity = new BN("3");
 
     beforeEach(async () => {
-      bugBounty = await BugBounty.new(dai.address);
+      bugBounty = await deployBugBounty(dai.address);
       await distributeDai(accounts, dai);
       await depositDai(accounts, dai, bugBounty);
 
@@ -457,8 +561,30 @@ contract("Solidified Bug Bounty", accounts => {
     });
 
     //reject arbitration
+    it("Defendant party can reject arbitration", async () => {
+      const plaintiff = projectOwner;
+      const defendant = hunter;
+      await bugBounty.sendToArbitration(projectId, bugId, { from: plaintiff });
+      await bugBounty.rejectArbitration(arbitrationId, { from: defendant });
+
+      const arb = await bugBounty.getArbitrationDetails(arbitrationId);
+      let bug = await bugBounty.getBugDetails.call(bugId);
+      assert.isTrue(bug[1].eq(new BN("1")));
+      assert.equal(arb[0], plaintiff);
+      assert.equal(arb[1], defendant);
+    });
 
     //timeout reject
+    it("Anyone can reject arbitration if timeout has passed", async () => {
+      const plaintiff = projectOwner;
+      const defendant = hunter;
+      await bugBounty.sendToArbitration(projectId, bugId, { from: plaintiff });
+      await time.increase(time.duration.days("4"));
+      await bugBounty.rejectArbitration(arbitrationId);
+
+      let bug = await bugBounty.getBugDetails.call(bugId);
+      assert.isTrue(bug[1].eq(new BN("1")));
+    });
 
     //accept arbitration
     it("Defendant can accept arbitration", async () => {
@@ -471,17 +597,142 @@ contract("Solidified Bug Bounty", accounts => {
       assert.equal(arb[0], plaintiff);
       assert.equal(arb[1], defendant);
     });
+  }); //Context Arbitration
+
+  context("Arbitration Voting", async () => {
+    const totalPool = ether("5");
+    const ipfsHash = web3.utils.asciiToHex("Project Info");
+    const rewards = [
+      ether("3"),
+      ether("2"),
+      ether("1"),
+      ether("0.5"),
+      ether("0.1")
+    ];
+
+    const projectOwner = accounts[1];
+    const hunter = accounts[2];
+    const projectId = web3.utils.soliditySha3(
+      { t: "address", v: projectOwner },
+      { t: "uint256", v: 1 }
+    );
+    const bugId = web3.utils.soliditySha3(
+      { t: "bytes32", v: projectId },
+      { t: "uint256", v: 0 }
+    );
+    const arbitrationId = web3.utils.soliditySha3(
+      { t: "bytes32", v: projectId },
+      { t: "bytes32", v: bugId }
+    );
+    const bugInfo = web3.utils.asciiToHex("Bug Info");
+    const severity = new BN("2");
+    const newSeverity = new BN("2");
+    const justification = web3.utils.asciiToHex("Justification");
+    const counterJust = web3.utils.asciiToHex("Counter Justification");
+    const finalSeverity = new BN("3");
+    const plaintiff = projectOwner;
+    const defendant = hunter;
+    const votingFee = new BN(ether("10"));
+    const voters = [
+      accounts[5],
+      accounts[6],
+      accounts[7],
+      accounts[8],
+      accounts[9]
+    ];
+    const reputations = [25, 60, 50, 10, 8];
+    const votes = generateVotes(voters.length);
+
+    beforeEach(async () => {
+      bugBounty = await deployBugBounty(dai.address);
+      await distributeDai(accounts, dai);
+      await depositDai(accounts, dai, bugBounty);
+
+      await bugBounty.postProject(ipfsHash, totalPool, rewards, {
+        from: projectOwner
+      });
+      await bugBounty.postBug(bugInfo, projectId, severity, { from: hunter });
+
+      await bugBounty.rejectBug(projectId, bugId, justification, newSeverity, {
+        from: projectOwner
+      });
+
+      await bugBounty.counterProposal(
+        projectId,
+        bugId,
+        counterJust,
+        finalSeverity,
+        { from: hunter }
+      );
+
+      await bugBounty.sendToArbitration(projectId, bugId, { from: plaintiff });
+      await bugBounty.acceptArbitration(arbitrationId, { from: defendant });
+      await bugBounty.giveReputationTEST(voters, reputations);
+    });
 
     //vote on arbitration
     it("Third party can vote on arbitration", async () => {
-      const plaintiff = projectOwner;
-      const defendant = hunter;
       const voter = accounts[5];
-      await bugBounty.sendToArbitration(projectId, bugId, { from: plaintiff });
-      await bugBounty.acceptArbitration(arbitrationId, { from: defendant });
 
-      const vote = web3.utils.soliditySha3("1", "666");
+      const vote = web3.utils.soliditySha3(
+        { t: "uint256", v: "1" },
+        { t: "bytes32", v: "666" }
+      );
       await bugBounty.commitVote(arbitrationId, vote, { from: voter });
     });
-  }); //Context Arbitration
+
+    it("Anyone can slash a commit if reveald porematurely", async () => {
+      const slasher = accounts[8];
+      await bugBounty.commitVote(arbitrationId, votes[0].commit, {
+        from: voters[0]
+      });
+      let beforeBal = await bugBounty.balances.call(slasher);
+      await bugBounty.slashCommit(
+        arbitrationId,
+        votes[0].ruling,
+        votes[0].salt,
+        voters[0],
+        {
+          from: slasher
+        }
+      );
+      let afterBal = await bugBounty.balances.call(slasher);
+      const vt = web3.utils.soliditySha3(
+        { t: "uint256", v: votes[0].ruling },
+        { t: "bytes32", v: votes[0].salt }
+      );
+      assert.isTrue(beforeBal.eq(afterBal.sub(votingFee)));
+    });
+
+    it("Handles many voters correctly", async () => {
+      await bugBounty.giveReputationTEST(voters, reputations);
+
+      for (var i = 0; i < voters.length; i++) {
+        await bugBounty.commitVote(arbitrationId, votes[i].commit, {
+          from: voters[i]
+        });
+      }
+      await time.increase(time.duration.days("4"));
+      for (var i = 0; i < voters.length; i++) {
+        await bugBounty.revealCommit(
+          arbitrationId,
+          votes[i].ruling,
+          votes[i].salt,
+          {
+            from: voters[i]
+          }
+        );
+      }
+      const arb = await bugBounty.getArbitrationDetails.call(arbitrationId);
+      assert.isTrue(arb[4].eq(new BN(5)));
+
+      await time.increase(time.duration.days("20"));
+      await bugBounty.resolveArbitration(arbitrationId);
+      const results = tallyVotes(votes);
+      let talliedResult = await bugBounty.tallyVotes.call(arbitrationId);
+      assert.equal(results[0], talliedResult[0]);
+      assert.equal(results[1], talliedResult[1]);
+      assert.equal(results[2], talliedResult[2]);
+    });
+  }); //Context Voting
 });
