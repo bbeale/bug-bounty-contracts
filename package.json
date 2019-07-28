@@ -22,8 +22,10 @@
   },
   "homepage": "https://github.com/solidified-platform/bug-bounty-contracts#readme",
   "dependencies": {
+    "dotenv": "^8.0.0",
     "openzeppelin-solidity": "^2.3.0",
-    "truffle": "^5.0.18"
+    "truffle": "^5.0.18",
+    "truffle-hdwallet-provider": "^1.0.15"
   },
   "devDependencies": {
     "chai": "^4.2.0",
