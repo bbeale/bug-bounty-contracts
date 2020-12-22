@@ -1,7 +1,7 @@
 pragma solidity 0.5.0;
 
 import "./SolidifiedStorage.sol";
-import "../node_modules/openzeppelin-solidity/contracts/ownership/Ownable.sol";
+import "openzeppelin-solidity/contracts/ownership/Ownable.sol";
 /**
  * @title Proxy
  * @dev Gives the possibility to delegate any call to a foreign implementation.
